@@ -33,7 +33,7 @@ async def neo4j_test_settings() -> AsyncIterator[Settings]:
         neo4j_uri="neo4j://127.0.0.1:7687",
         neo4j_user="neo4j",
         neo4j_password="password",
-        neo4j_database="data_compass",
+        neo4j_database="neo4j",
     )
 
     # Override the cached settings

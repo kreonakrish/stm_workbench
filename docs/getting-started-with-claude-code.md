@@ -11,7 +11,8 @@ Before you start:
 - [ ] `cd` into that directory
 - [ ] `git init && git add . && git commit -m "Initial scaffold"` — version
       control before any AI-generated changes
-- [ ] Docker Desktop running (for Neo4j and Redis containers)
+- [ ] Local Neo4j running on `neo4j://127.0.0.1:7687` (not containerized)
+- [ ] Docker Desktop running (for the Redis container)
 - [ ] Open a terminal in the project root
 - [ ] Run `claude` to start Claude Code
 
@@ -29,8 +30,9 @@ need to repeat the architecture in every prompt.
 ## What to do, by phase
 
 ### Before T-001
-- Verify scaffolding: run `docker compose up -d`, `cd backend && uv sync`
-- Confirm Neo4j is reachable at http://localhost:7474
+- Confirm your local Neo4j is reachable at http://localhost:7474
+- Run `docker compose up -d` (brings up Redis only)
+- `cd backend && uv sync`
 
 ### T-001 (repo scaffolding completion)
 - The scaffold is mostly complete — T-001 is verifying it works

@@ -16,17 +16,20 @@ See `/docs/adr/` for foundational decisions.
 ## Quick start
 
 ### Prerequisites
-- Docker (for local Neo4j and Redis)
+- Local Neo4j 5.x (Community or Enterprise) running on `neo4j://127.0.0.1:7687`
+- Docker (for Redis only)
 - Python 3.12+
 - Node.js 20+
 - `uv` (recommended) or `pip` for Python deps
 
 ### 1. Start dependencies
 ```bash
-docker compose up -d
+docker compose up -d        # Redis only
 ```
 
-This starts Neo4j on `bolt://localhost:7687` and Redis on `localhost:6379`.
+Redis runs on `localhost:6379`. Neo4j is **not** in docker-compose — start your
+local Neo4j separately and confirm it's reachable at http://localhost:7474.
+Set `NEO4J_PASSWORD` in your `backend/.env` (copy from `.env.example`).
 
 ### 2. Backend
 ```bash
