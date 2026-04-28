@@ -37,9 +37,10 @@ async def get_applied_migrations(driver: AsyncDriver) -> set[str]:
 async def apply_migration(driver: AsyncDriver, path: Path) -> None:
     """Apply a single migration file."""
     cypher = path.read_text(encoding="utf-8")
-    # Split on semicolons that terminate statements (simple split is safe here
-    # because our migrations don't contain semicolons inside strings).
-    statements = [s.strip() for s in cypher.split(";") if s.strip() and not s.strip().startswith("//")]
+    # Strip // line comments before splitting, so a semicolon inside a comment
+    # ("Does NOT seed any data; seeding is done...") doesn't fragment the parse.
+    cleaned = "\n".join(ln for ln in cypher.splitlines() if not ln.lstrip().startswith("//"))
+    statements = [s.strip() for s in cleaned.split(";") if s.strip()]
 
     async with driver.session(database=get_settings().neo4j_database) as session:
         for stmt in statements:
