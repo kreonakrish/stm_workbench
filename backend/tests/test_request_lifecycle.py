@@ -30,9 +30,10 @@ async def neo4j_test_settings() -> AsyncIterator[Settings]:
     """
     test_settings = Settings(
         environment="local",
-        neo4j_uri="bolt://localhost:7687",
+        neo4j_uri="neo4j://127.0.0.1:7687",
         neo4j_user="neo4j",
         neo4j_password="password",
+        neo4j_database="data_compass",
     )
 
     # Override the cached settings
@@ -67,7 +68,7 @@ async def seed_default_template(neo4j_test_settings: Settings) -> AsyncIterator[
         auth=(neo4j_test_settings.neo4j_user, neo4j_test_settings.neo4j_password),
     )
     try:
-        async with driver.session() as session:
+        async with driver.session(database=neo4j_test_settings.neo4j_database) as session:
             await session.run("""
                 MERGE (t:WorkflowTemplate {id: 'default'})
                 ON CREATE SET t.name = 'Default V1', t.version = 1, t.applies_to = ['all']
@@ -80,7 +81,7 @@ async def seed_default_template(neo4j_test_settings: Settings) -> AsyncIterator[
                 MERGE (s1)-[:ALLOWS_TRANSITION]->(tr:Transition {id: 'intake_to_discovery'})-[:TO]->(s2)
             """)
         yield
-        async with driver.session() as session:
+        async with driver.session(database=neo4j_test_settings.neo4j_database) as session:
             await session.run("MATCH (n) DETACH DELETE n")
     finally:
         await driver.close()

@@ -16,6 +16,7 @@ from pathlib import Path
 import structlog
 from neo4j import AsyncDriver
 
+from app.config import get_settings
 from app.graph.driver import close_driver, get_driver
 
 logger = structlog.get_logger(__name__)
@@ -26,7 +27,7 @@ MIGRATION_PATTERN = re.compile(r"^(\d{3})_.+\.cypher$")
 
 async def get_applied_migrations(driver: AsyncDriver) -> set[str]:
     """Return the set of migration_ids already applied."""
-    async with driver.session() as session:
+    async with driver.session(database=get_settings().neo4j_database) as session:
         result = await session.run(
             "MATCH (m:SchemaMigration) RETURN m.migration_id AS id"
         )
@@ -40,7 +41,7 @@ async def apply_migration(driver: AsyncDriver, path: Path) -> None:
     # because our migrations don't contain semicolons inside strings).
     statements = [s.strip() for s in cypher.split(";") if s.strip() and not s.strip().startswith("//")]
 
-    async with driver.session() as session:
+    async with driver.session(database=get_settings().neo4j_database) as session:
         for stmt in statements:
             await session.run(stmt)
     logger.info("migration_applied", migration=path.name)

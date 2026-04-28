@@ -14,6 +14,7 @@ from uuid import UUID
 import structlog
 from fastapi import HTTPException, status
 
+from app.config import get_settings
 from app.domain.requests import Request, TransitionEvent, TransitionResult
 from app.graph.driver import get_driver
 
@@ -29,7 +30,7 @@ class WorkflowEngine:
         MATCH (stage)-[:ALLOWS_TRANSITION]->(t:Transition)-[:TO]->(target:Stage)
         RETURN target.id AS to_stage_id
         """
-        async with driver.session() as session:
+        async with driver.session(database=get_settings().neo4j_database) as session:
             result = await session.run(cypher, request_id=str(request_id))
             return [record["to_stage_id"] async for record in result]
 
@@ -75,7 +76,7 @@ class WorkflowEngine:
         RETURN r AS request, target AS current_stage, event AS event
         """
         driver = get_driver()
-        async with driver.session() as session:
+        async with driver.session(database=get_settings().neo4j_database) as session:
             result = await session.run(
                 cypher,
                 request_id=str(request_id),

@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 import structlog
 from fastapi import HTTPException, status
 
+from app.config import get_settings
 from app.domain.requests import (
     CreateRequestInput,
     Request,
@@ -40,7 +41,7 @@ class RequestService:
         request_id = uuid4()
         cypher = get_query("create_request")
         driver = get_driver()
-        async with driver.session() as session:
+        async with driver.session(database=get_settings().neo4j_database) as session:
             result = await session.run(
                 cypher,
                 request_id=str(request_id),
@@ -72,7 +73,7 @@ class RequestService:
     async def get_request(self, request_id: UUID) -> Request | None:
         cypher = get_query("get_request_by_id")
         driver = get_driver()
-        async with driver.session() as session:
+        async with driver.session(database=get_settings().neo4j_database) as session:
             result = await session.run(cypher, request_id=str(request_id))
             record = await result.single()
 
