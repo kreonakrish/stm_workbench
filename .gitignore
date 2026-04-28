@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# Generated TypeScript API client (regenerated from OpenAPI)
+frontend/src/api/schema.ts
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code local-only settings (per-user, per-machine permission grants)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Docker volumes
+neo4j-data/
+neo4j-logs/
+redis-data/
+
+# Test artifacts
+.pytest_cache/
+coverage.xml
+junit.xml
