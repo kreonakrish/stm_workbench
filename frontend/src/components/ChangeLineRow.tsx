@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Combobox, type ComboboxOption } from "./Combobox";
 
 export type ChangeCategory = "ddl" | "dml" | "etl_logic";
 export type PipelineLayer = "ingestion" | "transformation" | "provisioning";
@@ -169,11 +170,6 @@ interface Props {
 }
 
 export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
-  const [entityQuery, setEntityQuery] = useState(value.entity ?? "");
-  useEffect(() => {
-    setEntityQuery(value.entity ?? "");
-  }, [value.entity]);
-
   const entitiesQuery = useQuery({
     queryKey: ["ontology-entities"],
     queryFn: fetchEntities,
@@ -183,6 +179,26 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
     queryFn: () => fetchAttributes(value.entity),
     enabled: Boolean(value.entity),
   });
+
+  const entityOptions = useMemo<ComboboxOption[]>(
+    () =>
+      (entitiesQuery.data ?? []).map((e) => ({
+        value: e.name,
+        description: e.description ?? `${e.attribute_count} attributes`,
+        badge: `${e.attribute_count}`,
+      })),
+    [entitiesQuery.data],
+  );
+  const attributeOptions = useMemo<ComboboxOption[]>(
+    () =>
+      (attributesQuery.data ?? []).map((a) => ({
+        value: a.name,
+        description:
+          a.description ?? a.data_type ?? a.pii_classification ?? null,
+        badge: a.is_key ? "key" : (a.data_type ?? undefined),
+      })),
+    [attributesQuery.data],
+  );
 
   function update<K extends keyof ChangeLineClassified>(
     key: K,
@@ -270,23 +286,13 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
           <label className="mb-1 block text-xs font-medium text-gray-600">
             Business entity
           </label>
-          <input
-            list={`entity-list-${index}`}
-            value={entityQuery}
-            onChange={(e) => {
-              setEntityQuery(e.target.value);
-              update("entity", e.target.value);
-            }}
-            placeholder="Borrower, MortgageLoan, …"
-            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          <Combobox
+            value={value.entity}
+            onChange={(v) => update("entity", v)}
+            options={entityOptions}
+            placeholder="Pick an entity (Borrower, MortgageLoan, …) or add new"
+            emptyMessage="No matching entity"
           />
-          <datalist id={`entity-list-${index}`}>
-            {(entitiesQuery.data ?? []).map((e) => (
-              <option key={e.name} value={e.name}>
-                {e.description ?? ""}
-              </option>
-            ))}
-          </datalist>
         </div>
 
         {showsTargetAttribute(value.action) && (
@@ -294,22 +300,22 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
             <label className="mb-1 block text-xs font-medium text-gray-600">
               Target attribute (business)
             </label>
-            <input
-              list={`attribute-list-${index}`}
+            <Combobox
               value={value.target_attribute ?? ""}
-              onChange={(e) =>
-                update("target_attribute", e.target.value || null)
+              onChange={(v) => update("target_attribute", v || null)}
+              options={attributeOptions}
+              placeholder={
+                value.entity
+                  ? `Pick a ${value.entity} attribute or add new`
+                  : "Pick the entity first"
               }
-              placeholder="ssn, current_fico_score, …"
-              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              emptyMessage={
+                value.entity
+                  ? `No attributes seeded for ${value.entity} yet`
+                  : "Pick the entity first"
+              }
+              disabled={!value.entity}
             />
-            <datalist id={`attribute-list-${index}`}>
-              {(attributesQuery.data ?? []).map((a) => (
-                <option key={a.id} value={a.name}>
-                  {a.description ?? a.data_type ?? ""}
-                </option>
-              ))}
-            </datalist>
           </div>
         )}
       </div>
