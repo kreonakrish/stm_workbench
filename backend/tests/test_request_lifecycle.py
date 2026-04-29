@@ -1,56 +1,13 @@
 """Tests for the request lifecycle.
 
-These tests spin up an ephemeral Neo4j via testcontainers; run with:
-    pytest tests/test_request_lifecycle.py -v
-
-Requires Docker available locally. Shared fixtures live in conftest.py.
+Migration 004 seeds the default workflow template, so individual tests
+do not need to seed it themselves. Shared fixtures (testcontainer,
+migrations, per-test cleanup, ASGI client) live in conftest.py.
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from neo4j import AsyncGraphDatabase
-
-from app.config import Settings
-from app.main import create_app
-
-
-@pytest_asyncio.fixture
-async def seed_default_template(neo4j_test_settings: Settings) -> AsyncIterator[None]:
-    """Seed a minimal default workflow template."""
-    driver = AsyncGraphDatabase.driver(
-        neo4j_test_settings.neo4j_uri,
-        auth=(neo4j_test_settings.neo4j_user, neo4j_test_settings.neo4j_password),
-    )
-    try:
-        async with driver.session(database=neo4j_test_settings.neo4j_database) as session:
-            await session.run("""
-                MERGE (t:STMWorkflowTemplate {id: 'default'})
-                ON CREATE SET t.name = 'Default V1', t.version = 1, t.applies_to = ['all']
-                MERGE (s1:STMStage {id: 'intake'})
-                ON CREATE SET s1.name = 'Intake', s1.is_initial = true, s1.allowed_actors = ['requester']
-                MERGE (s2:STMStage {id: 'discovery'})
-                ON CREATE SET s2.name = 'Discovery', s2.is_initial = false, s2.allowed_actors = ['data_owner']
-                MERGE (t)-[:HAS_STAGE]->(s1)
-                MERGE (t)-[:HAS_STAGE]->(s2)
-                MERGE (s1)-[:ALLOWS_TRANSITION]->(tr:STMTransition {id: 'intake_to_discovery'})-[:TO]->(s2)
-            """)
-        yield
-        async with driver.session(database=neo4j_test_settings.neo4j_database) as session:
-            await session.run("MATCH (n) DETACH DELETE n")
-    finally:
-        await driver.close()
-
-
-@pytest_asyncio.fixture
-async def client(seed_default_template: None) -> AsyncIterator[AsyncClient]:
-    app = create_app()
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio

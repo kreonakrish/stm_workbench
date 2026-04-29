@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { WorkflowSwimlane } from "../components/WorkflowSwimlane";
 
 interface Request {
   id: string;
@@ -7,6 +8,7 @@ interface Request {
   business_question: string;
   usage_context: string;
   consumption_pattern: string;
+  current_stage_id: string;
   current_stage_name: string;
   created_at: string;
 }
@@ -30,13 +32,23 @@ export function RequestDetailPage() {
   if (!data) return <div className="text-sm text-gray-500">Not found.</div>;
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">
-        Stage: {data.current_stage_name}
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div>
+        <div className="mb-2 text-xs uppercase tracking-wide text-gray-500">
+          Stage: {data.current_stage_name}
+        </div>
+        <h1 className="text-2xl font-medium text-gray-900">{data.title}</h1>
       </div>
-      <h1 className="mb-4 text-2xl font-medium text-gray-900">{data.title}</h1>
 
-      <div className="rounded-lg border bg-white p-6">
+      <section className="rounded-lg border bg-white p-6">
+        <h2 className="mb-4 text-sm font-medium text-gray-700">Workflow</h2>
+        <WorkflowSwimlane
+          templateId="default"
+          currentStageId={data.current_stage_id}
+        />
+      </section>
+
+      <section className="rounded-lg border bg-white p-6">
         <h2 className="mb-2 text-sm font-medium text-gray-700">Business question</h2>
         <p className="mb-6 text-sm text-gray-900">{data.business_question}</p>
 
@@ -50,7 +62,7 @@ export function RequestDetailPage() {
             <div className="text-gray-900">{data.consumption_pattern}</div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* TODO(T-032): Discovery candidates. T-027: cascade results. T-034: comments. */}
     </div>

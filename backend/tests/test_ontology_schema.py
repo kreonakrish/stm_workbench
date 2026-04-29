@@ -4,24 +4,13 @@ Verifies that, after bootstrap migrations land, the schema endpoint:
 - enumerates the home-lending ontology labels imported by migration 003,
 - captures unique-property metadata from constraint-backed indexes,
 - merges in live label counts (which are mostly 0 on a fresh container).
+
+Shared fixtures (testcontainer, migrations, client) live in conftest.py.
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-
-from app.main import create_app
-
-
-@pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    app = create_app()
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
