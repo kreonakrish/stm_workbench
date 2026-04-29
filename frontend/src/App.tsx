@@ -1,13 +1,8 @@
-import { lazy, Suspense } from "react";
 import { Route, Routes, Link } from "react-router-dom";
 import { IntakePage } from "./pages/IntakePage";
 import { JADBoardPage } from "./pages/JADBoardPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
-
-// Lazy-load the ontology page so @xyflow/react bundles only on /ontology.
-const OntologyPage = lazy(() =>
-  import("./pages/OntologyPage").then((m) => ({ default: m.OntologyPage })),
-);
+import { OntologyPage } from "./pages/OntologyPage";
 
 export function App() {
   return (
@@ -29,14 +24,7 @@ export function App() {
           <Route path="/" element={<JADBoardPage />} />
           <Route path="/intake" element={<IntakePage />} />
           <Route path="/board" element={<JADBoardPage />} />
-          <Route
-            path="/ontology"
-            element={
-              <Suspense fallback={<div className="text-sm text-gray-500">Loading…</div>}>
-                <OntologyPage />
-              </Suspense>
-            }
-          />
+          <Route path="/ontology" element={<OntologyPage />} />
           <Route path="/requests/:id" element={<RequestDetailPage />} />
         </Routes>
       </main>

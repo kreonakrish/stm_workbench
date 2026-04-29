@@ -21,6 +21,16 @@ async def list_entities(
 
 
 @router.get(
+    "/ontology/catalog",
+    summary="Hierarchical catalog: entity → attributes → physical sources",
+)
+async def get_catalog(
+    service: OntologyService = Depends(get_ontology_service),
+) -> list[dict]:
+    return await service.get_catalog()
+
+
+@router.get(
     "/ontology/entities/{entity_name}/attributes",
     summary="List all BusinessAttributes attached to a given entity",
 )

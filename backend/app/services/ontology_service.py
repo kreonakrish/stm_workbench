@@ -124,6 +124,76 @@ class OntologyService:
             result = await session.run(get_query("list_entities"))
             return [r.data() async for r in result]
 
+    async def get_catalog(self) -> list[dict]:
+        """Hierarchical catalog: entity → attributes → physical sources.
+
+        One entry per Entity, each containing its sorted list of
+        BusinessAttributes, each with the physical PhysicalColumn rows
+        that source it (de-duplicated, ordered by system / table / column).
+        """
+        driver = get_driver()
+        async with driver.session(database=get_settings().neo4j_database) as session:
+            result = await session.run(get_query("get_ontology_catalog"))
+            rows = [r.data() async for r in result]
+
+        entities: dict[str, dict] = {}
+        for row in rows:
+            entity_name = row["entity"]
+            entity = entities.setdefault(
+                entity_name,
+                {
+                    "name": entity_name,
+                    "description": row.get("entity_description"),
+                    "attributes": {},
+                },
+            )
+            attribute_id = row.get("attribute_id")
+            if not attribute_id:
+                continue
+            attribute = entity["attributes"].setdefault(
+                attribute_id,
+                {
+                    "id": attribute_id,
+                    "name": row.get("attribute_name"),
+                    "description": row.get("attribute_description"),
+                    "data_type": row.get("attribute_data_type"),
+                    "pii_classification": row.get("pii_classification"),
+                    "is_key": bool(row.get("is_key")),
+                    "sources": [],
+                },
+            )
+            column_id = row.get("column_id")
+            if column_id:
+                attribute["sources"].append(
+                    {
+                        "system_id": row.get("system_id"),
+                        "system_name": row.get("system_name"),
+                        "system_kind": row.get("system_kind"),
+                        "schema": row.get("source_schema"),
+                        "table": row.get("source_table"),
+                        "column": row.get("column_name"),
+                        "column_id": column_id,
+                        "data_type": row.get("column_data_type"),
+                    }
+                )
+
+        catalog: list[dict] = []
+        for name in sorted(entities):
+            entity = entities[name]
+            attributes = sorted(
+                entity["attributes"].values(),
+                key=lambda a: (not a.get("is_key"), a.get("name") or ""),
+            )
+            catalog.append(
+                {
+                    "name": entity["name"],
+                    "description": entity["description"],
+                    "attribute_count": len(attributes),
+                    "attributes": attributes,
+                }
+            )
+        return catalog
+
     async def list_attributes(self, entity: str) -> list[dict]:
         """All BusinessAttributes attached to a given entity."""
         driver = get_driver()
