@@ -27,8 +27,14 @@ def get_driver() -> AsyncDriver:
 
 
 async def close_driver() -> None:
-    """Close the driver on shutdown."""
+    """Close the driver on shutdown.
+
+    Always clears the singleton, even if close errors — a partially-closed
+    driver bound to a defunct event loop must not be reused.
+    """
     global _driver
     if _driver is not None:
-        await _driver.close()
-        _driver = None
+        try:
+            await _driver.close()
+        finally:
+            _driver = None

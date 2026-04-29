@@ -1,61 +1,85 @@
 """Tests for the request lifecycle.
 
-These tests use a Neo4j testcontainer; run with:
+These tests spin up an ephemeral Neo4j via testcontainers; run with:
     pytest tests/test_request_lifecycle.py -v
 
 Requires Docker available locally.
 """
 from __future__ import annotations
 
-import asyncio
+import os
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from neo4j import AsyncGraphDatabase
+from testcontainers.neo4j import Neo4jContainer
 
 from app.config import Settings, get_settings
 from app.graph.driver import close_driver
 from app.graph.migrations import run_migrations
 from app.main import create_app
 
+_NEO4J_ENV_KEYS = ("NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "NEO4J_DATABASE")
+
 
 @pytest_asyncio.fixture(scope="session")
 async def neo4j_test_settings() -> AsyncIterator[Settings]:
-    """Override settings to point at a test Neo4j instance.
+    """Spin up an ephemeral Neo4j container and point the app at it via env vars.
 
-    Assumes a Neo4j is running locally on bolt://localhost:7687 with
-    test credentials. In CI, this is provided by docker-compose.
+    Env-var injection is required — modules that did `from app.config import
+    get_settings` hold a bound reference, so monkey-patching the function on
+    the config module wouldn't reach them. Pydantic-settings reads env on
+    first instantiation, so clearing the lru_cache propagates the override
+    everywhere.
+
+    A fresh container per pytest session — never touches the developer's local DB.
     """
-    test_settings = Settings(
-        environment="local",
-        neo4j_uri="neo4j://127.0.0.1:7687",
-        neo4j_user="neo4j",
-        neo4j_password="password",
-        neo4j_database="neo4j",
-    )
+    saved_env = {k: os.environ.get(k) for k in _NEO4J_ENV_KEYS}
 
-    # Override the cached settings
-    get_settings.cache_clear()
+    with Neo4jContainer("neo4j:5.25-community") as neo4j:
+        bolt_url = neo4j.get_connection_url()
 
-    def _override() -> Settings:
-        return test_settings
+        os.environ["NEO4J_URI"] = bolt_url
+        os.environ["NEO4J_USER"] = "neo4j"
+        os.environ["NEO4J_PASSWORD"] = neo4j.password
+        os.environ["NEO4J_DATABASE"] = "neo4j"
+        get_settings.cache_clear()
 
-    import app.config as config_module
-    original = config_module.get_settings
-    config_module.get_settings = _override  # type: ignore[assignment]
-
-    yield test_settings
-
-    config_module.get_settings = original  # type: ignore[assignment]
-    get_settings.cache_clear()
+        try:
+            yield get_settings()
+        finally:
+            get_settings.cache_clear()
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def apply_migrations(neo4j_test_settings: Settings) -> AsyncIterator[None]:
-    """Apply schema migrations before tests run."""
+    """Apply schema migrations, then drop the singleton driver.
+
+    Migrations open the driver on the session-scope event loop; closing it
+    here forces each function-scoped test's lifespan to create a fresh driver
+    bound to its own loop, avoiding cross-loop Future errors.
+    """
     await run_migrations()
+    await close_driver()
+    yield
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_driver_between_tests() -> AsyncIterator[None]:
+    """Close the singleton Neo4j driver after each test.
+
+    httpx's ASGITransport does NOT fire FastAPI lifespan events, so the
+    driver opened lazily during a test is never closed between tests. Without
+    this reset the next test reuses a connection bound to a now-closed event
+    loop, surfacing as `'NoneType' object has no attribute 'send'`.
+    """
     yield
     await close_driver()
 
