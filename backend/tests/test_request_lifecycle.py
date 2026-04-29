@@ -104,27 +104,35 @@ async def test_create_request_with_items_classifies_and_persists(
             "template_id": "default",
             "items": [
                 {
-                    "type": "add_attribute",
+                    "category": "ddl",
+                    "action": "add_column",
+                    "pipeline_layer": "transformation",
                     "entity": "Borrower",
-                    "attribute": "ssn",
+                    "target_attribute": "ssn",
+                    "target_data_type": "VARCHAR(11)",
                 },
                 {
-                    "type": "add_attribute",
+                    "category": "ddl",
+                    "action": "add_column",
+                    "pipeline_layer": "transformation",
                     "entity": "Borrower",
-                    "attribute": "twitter_handle",
+                    "target_attribute": "twitter_handle",
+                    "target_data_type": "STRING",
                 },
                 {
-                    "type": "change_logic",
+                    "category": "etl_logic",
+                    "action": "modify_transformation",
+                    "pipeline_layer": "transformation",
                     "entity": "Borrower",
-                    "attribute": "current_fico_score",
-                    "new_logic": "weekly bureau pull",
+                    "target_attribute": "current_fico_score",
+                    "transformation_logic": "weekly bureau pull",
                 },
             ],
         },
     )
     assert response.status_code == 201
     body = response.json()
-    items = {it["attribute"]: it for it in body["items"]}
+    items = {it["target_attribute"]: it for it in body["items"]}
     assert items["ssn"]["classification"] == "exists"
     assert items["twitter_handle"]["classification"] == "net_new"
     assert items["current_fico_score"]["classification"] == "needs_change"
@@ -132,6 +140,9 @@ async def test_create_request_with_items_classifies_and_persists(
     # Refetch — items must round-trip from the graph identically.
     fetch = await client.get(f"/api/v1/requests/{body['id']}")
     assert fetch.status_code == 200
-    refetched = {it["attribute"]: it for it in fetch.json()["items"]}
+    refetched = {it["target_attribute"]: it for it in fetch.json()["items"]}
     assert refetched["ssn"]["classification"] == "exists"
     assert refetched["twitter_handle"]["classification"] == "net_new"
+    assert refetched["ssn"]["category"] == "ddl"
+    assert refetched["ssn"]["action"] == "add_column"
+    assert refetched["current_fico_score"]["action"] == "modify_transformation"
