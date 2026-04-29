@@ -13,7 +13,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, requests as requests_router
+from app.api import health, ontology, requests as requests_router
 from app.config import get_settings
 from app.graph.driver import close_driver, get_driver
 from app.middleware import RequestIdMiddleware
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health.router, tags=["health"])
     app.include_router(requests_router.router, prefix="/api/v1", tags=["requests"])
+    app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 
     return app
 
