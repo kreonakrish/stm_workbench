@@ -1,10 +1,11 @@
 // Create a new :Request node and link to its initial stage.
+// Uses :STM* namespaced workflow labels per ADR 0006.
 //
 // Parameters:
 //   request_id, title, business_question, usage_context,
 //   consumption_pattern, deadline, requester_id, template_id
 
-MATCH (template:WorkflowTemplate {id: $template_id})-[:HAS_STAGE]->(initial:Stage {is_initial: true})
+MATCH (template:STMWorkflowTemplate {id: $template_id})-[:HAS_STAGE]->(initial:STMStage {is_initial: true})
 CREATE (r:Request {
     id: $request_id,
     title: $title,
@@ -19,7 +20,7 @@ CREATE (r:Request {
 })
 CREATE (r)-[:FOLLOWS_TEMPLATE]->(template)
 CREATE (r)-[:CURRENTLY_IN]->(initial)
-CREATE (event:TransitionEvent {
+CREATE (event:STMTransitionEvent {
     id: randomUUID(),
     request_id: r.id,
     from_stage: null,

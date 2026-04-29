@@ -94,15 +94,15 @@ async def seed_default_template(neo4j_test_settings: Settings) -> AsyncIterator[
     try:
         async with driver.session(database=neo4j_test_settings.neo4j_database) as session:
             await session.run("""
-                MERGE (t:WorkflowTemplate {id: 'default'})
+                MERGE (t:STMWorkflowTemplate {id: 'default'})
                 ON CREATE SET t.name = 'Default V1', t.version = 1, t.applies_to = ['all']
-                MERGE (s1:Stage {id: 'intake'})
+                MERGE (s1:STMStage {id: 'intake'})
                 ON CREATE SET s1.name = 'Intake', s1.is_initial = true, s1.allowed_actors = ['requester']
-                MERGE (s2:Stage {id: 'discovery'})
+                MERGE (s2:STMStage {id: 'discovery'})
                 ON CREATE SET s2.name = 'Discovery', s2.is_initial = false, s2.allowed_actors = ['data_owner']
                 MERGE (t)-[:HAS_STAGE]->(s1)
                 MERGE (t)-[:HAS_STAGE]->(s2)
-                MERGE (s1)-[:ALLOWS_TRANSITION]->(tr:Transition {id: 'intake_to_discovery'})-[:TO]->(s2)
+                MERGE (s1)-[:ALLOWS_TRANSITION]->(tr:STMTransition {id: 'intake_to_discovery'})-[:TO]->(s2)
             """)
         yield
         async with driver.session(database=neo4j_test_settings.neo4j_database) as session:

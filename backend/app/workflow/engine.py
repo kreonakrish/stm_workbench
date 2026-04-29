@@ -26,8 +26,8 @@ class WorkflowEngine:
         """Return the IDs of stages this request can transition to."""
         driver = get_driver()
         cypher = """
-        MATCH (r:Request {id: $request_id})-[:CURRENTLY_IN]->(stage:Stage)
-        MATCH (stage)-[:ALLOWS_TRANSITION]->(t:Transition)-[:TO]->(target:Stage)
+        MATCH (r:Request {id: $request_id})-[:CURRENTLY_IN]->(stage:STMStage)
+        MATCH (stage)-[:ALLOWS_TRANSITION]->(t:STMTransition)-[:TO]->(target:STMStage)
         RETURN target.id AS to_stage_id
         """
         async with driver.session(database=get_settings().neo4j_database) as session:
@@ -58,12 +58,12 @@ class WorkflowEngine:
         # node; reject with code='guard_failed' if any guard returns false.
 
         cypher = """
-        MATCH (r:Request {id: $request_id})-[cur:CURRENTLY_IN]->(from_stage:Stage)
-        MATCH (target:Stage {id: $to_stage_id})
+        MATCH (r:Request {id: $request_id})-[cur:CURRENTLY_IN]->(from_stage:STMStage)
+        MATCH (target:STMStage {id: $to_stage_id})
         DELETE cur
         CREATE (r)-[:CURRENTLY_IN]->(target)
         SET r.current_stage_id = target.id
-        CREATE (event:TransitionEvent {
+        CREATE (event:STMTransitionEvent {
             id: randomUUID(),
             request_id: r.id,
             from_stage: from_stage.id,
