@@ -1,4 +1,4 @@
-"""Ontology service — assembles the metagraph response from Neo4j metadata.
+"""Ontology service — assembles the metagraph and serves typeahead search.
 
 Used by the schema-visualization endpoint to power the Ontology page.
 Sources:
@@ -13,6 +13,8 @@ ontology shape before any crawls have populated it.
 """
 from __future__ import annotations
 
+import base64
+
 import structlog
 
 from app.config import get_settings
@@ -22,10 +24,20 @@ from app.domain.ontology import (
     PropertySchema,
     RelationshipSchema,
 )
+from app.domain.ontology_search import SearchHit, SearchResponse
 from app.graph.driver import get_driver
 from app.graph.queries import get_query
 
 logger = structlog.get_logger(__name__)
+
+
+def _encode_cursor(offset: int) -> str:
+    return base64.urlsafe_b64encode(str(offset).encode()).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> int:
+    pad = "=" * (-len(cursor) % 4)
+    return int(base64.urlsafe_b64decode((cursor + pad).encode()).decode())
 
 
 class OntologyService:
@@ -103,6 +115,77 @@ class OntologyService:
             )
             for label, props in sorted(per_label.items())
         ]
+
+
+    async def search(
+        self, *, query: str, cursor: str | None = None, limit: int = 20
+    ) -> SearchResponse:
+        """Typeahead over labels and their indexed properties.
+
+        Empty query returns no hits. Ranking: exact > prefix > substring on
+        property name first, then the same on label name. Properties with
+        unique-key constraints rank slightly higher within their tier.
+        """
+        if not query.strip():
+            return SearchResponse(hits=[], next_cursor=None)
+
+        schema = await self.get_schema()
+        hits = self._rank_hits(schema, query.strip().lower())
+
+        offset = _decode_cursor(cursor) if cursor else 0
+        page = hits[offset : offset + limit]
+        next_offset = offset + limit
+        next_cursor = _encode_cursor(next_offset) if next_offset < len(hits) else None
+        return SearchResponse(hits=page, next_cursor=next_cursor)
+
+    @staticmethod
+    def _rank_hits(schema: OntologySchema, q: str) -> list[SearchHit]:
+        """Score every (label, property) pair against `q` and return ordered hits.
+
+        Lower score = better match. Properties beat labels when the user is
+        looking for a field. Within each tier, exact match wins, then prefix,
+        then substring.
+        """
+
+        def score_string(s: str, term: str) -> int | None:
+            s = s.lower()
+            if s == term:
+                return 0
+            if s.startswith(term):
+                return 1
+            if term in s:
+                return 2
+            return None
+
+        scored: list[tuple[int, str, SearchHit]] = []
+        for label in schema.labels:
+            for prop in label.properties:
+                ps = score_string(prop.name, q)
+                if ps is not None:
+                    bonus = -1 if prop.unique else 0
+                    scored.append(
+                        (
+                            ps * 2 + bonus,
+                            f"{label.name}.{prop.name}",
+                            SearchHit(
+                                label=label.name,
+                                property=prop.name,
+                                display=f"{label.name}.{prop.name}",
+                                unique=prop.unique,
+                            ),
+                        )
+                    )
+            ls = score_string(label.name, q)
+            if ls is not None:
+                scored.append(
+                    (
+                        ls * 2 + 10,  # property hits beat label hits
+                        label.name,
+                        SearchHit(label=label.name, display=label.name),
+                    )
+                )
+        scored.sort(key=lambda t: (t[0], t[1]))
+        return [hit for _, _, hit in scored]
 
 
 def get_ontology_service() -> OntologyService:
