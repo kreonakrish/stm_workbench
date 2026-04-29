@@ -22,10 +22,26 @@ def _make_xlsx(rows: list[list[object]]) -> bytes:
 async def test_parse_excel_classifies_uploaded_rows(client: AsyncClient) -> None:
     xlsx = _make_xlsx(
         [
-            ["type", "entity", "attribute", "new_logic"],
-            ["add_attribute", "Borrower", "ssn", None],
-            ["add_attribute", "Borrower", "twitter_handle", None],
-            ["change_logic", "Borrower", "current_fico_score", "weekly"],
+            [
+                "category",
+                "action",
+                "pipeline_layer",
+                "entity",
+                "target_attribute",
+                "target_data_type",
+                "transformation_logic",
+            ],
+            ["ddl", "add_column", "transformation", "Borrower", "ssn", "VARCHAR(11)", None],
+            ["ddl", "add_column", "transformation", "Borrower", "twitter_handle", "STRING", None],
+            [
+                "etl_logic",
+                "modify_transformation",
+                "transformation",
+                "Borrower",
+                "current_fico_score",
+                None,
+                "weekly bureau pull",
+            ],
         ]
     )
     response = await client.post(
@@ -47,18 +63,26 @@ async def test_parse_excel_classifies_uploaded_rows(client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_parse_excel_skips_missing_required_fields(client: AsyncClient) -> None:
+async def test_parse_excel_skips_rows_missing_required_fields(
+    client: AsyncClient,
+) -> None:
     xlsx = _make_xlsx(
         [
-            ["type", "entity", "attribute"],
-            ["add_attribute", "Borrower", "ssn"],
-            [None, "Borrower", "ignored"],  # blank type → skipped
-            ["add_attribute", None, "ignored"],  # blank entity → skipped
+            ["category", "action", "pipeline_layer", "entity", "target_attribute"],
+            ["ddl", "add_column", "transformation", "Borrower", "ssn"],
+            [None, "add_column", "transformation", "Borrower", "ignored"],
+            ["ddl", "add_column", "transformation", None, "ignored"],
         ]
     )
     response = await client.post(
         "/api/v1/intake/parse-excel",
-        files={"file": ("intake.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={
+            "file": (
+                "intake.xlsx",
+                xlsx,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
     )
     assert response.status_code == 200
     body = response.json()
@@ -77,7 +101,13 @@ async def test_parse_excel_rejects_missing_required_headers(
     )
     response = await client.post(
         "/api/v1/intake/parse-excel",
-        files={"file": ("bad.xlsx", xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={
+            "file": (
+                "bad.xlsx",
+                xlsx,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
     )
     assert response.status_code == 400
-    assert "header" in response.json()["detail"].lower()
+    assert "category" in response.json()["detail"].lower()

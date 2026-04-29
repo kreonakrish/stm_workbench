@@ -32,60 +32,120 @@ class ConsumptionPattern(str, Enum):
     DASHBOARD = "dashboard"
 
 
-class ChangeType(str, Enum):
-    ADD_ATTRIBUTE = "add_attribute"
-    CHANGE_LOGIC = "change_logic"
+class ChangeCategory(str, Enum):
+    """The kind of pipeline change.
+
+    DDL        — schema-level (ADD/DROP/MODIFY table or column).
+    DML        — data-level (backfill, correction, historical purge).
+    ETL_LOGIC  — transformation/mapping/filter/join/aggregation logic.
+    """
+    DDL = "ddl"
+    DML = "dml"
+    ETL_LOGIC = "etl_logic"
+
+
+class PipelineLayer(str, Enum):
+    """Where in the data pipeline the change applies.
+
+    INGESTION       — source-system → raw landing zone.
+    TRANSFORMATION  — raw → curated business-conformed layer.
+    PROVISIONING    — curated → consumption (semantic, mart, feed).
+    """
+    INGESTION = "ingestion"
+    TRANSFORMATION = "transformation"
+    PROVISIONING = "provisioning"
+
+
+class ChangeAction(str, Enum):
+    """Specific action within a category. The form validates that the chosen
+    action is consistent with the category (DDL→ADD/DROP/MODIFY_*, etc.)."""
+    # DDL
     ADD_TABLE = "add_table"
-    DELETE_TABLE = "delete_table"
+    DROP_TABLE = "drop_table"
+    ADD_COLUMN = "add_column"
+    DROP_COLUMN = "drop_column"
+    MODIFY_COLUMN = "modify_column"
+    # DML
+    BACKFILL = "backfill"
+    DATA_CORRECTION = "data_correction"
+    DELETE_HISTORICAL = "delete_historical"
+    # ETL Logic
+    NEW_MAPPING = "new_mapping"
+    MODIFY_MAPPING = "modify_mapping"
+    MODIFY_TRANSFORMATION = "modify_transformation"
+    MODIFY_FILTER = "modify_filter"
+    MODIFY_AGGREGATION = "modify_aggregation"
+    MODIFY_JOIN = "modify_join"
 
 
 class Classification(str, Enum):
     """How a change line resolved against the ontology + physical sources."""
-    EXISTS = "exists"            # ontology already has this attribute/table
-    NET_NEW = "net_new"          # nothing matches; truly new
-    NEEDS_CHANGE = "needs_change"  # exists but the user wants to change its logic
-    INVALID = "invalid"          # references non-existent target (e.g. change_logic on
-                                 # an attribute that doesn't exist)
+    EXISTS = "exists"
+    NET_NEW = "net_new"
+    NEEDS_CHANGE = "needs_change"
+    INVALID = "invalid"
 
 
 class ChangeLineInput(BaseModel):
-    """Input form of a change line, sent on intake.
+    """Input form of a structured change line, sent on intake.
 
-    Not every field is required for every type:
-      add_attribute  : entity, attribute, business_definition (recommended),
-                       data_type, optional source_system/table/column
-      change_logic   : entity, attribute, new_logic
-      add_table      : entity, table, source_system
-      delete_table   : entity, table, source_system
-    Validation runs after persistence; the API does not reject under-filled
-    rows here so the user can save a draft and refine.
+    Required fields are category, action, pipeline_layer, entity. Other
+    fields are conditional — DDL column actions need target_column +
+    target_data_type; ETL_LOGIC actions need transformation_logic; DML
+    actions usually need source/target tables and a rationale.
+
+    Validation runs server-side after persistence; the API does not reject
+    under-filled rows here so the user can save a draft and refine.
     """
-    type: ChangeType
+    category: ChangeCategory
+    action: ChangeAction
+    pipeline_layer: PipelineLayer
     entity: str
-    attribute: str | None = None
-    table: str | None = None
+
+    target_attribute: str | None = None
+    target_dataset: str | None = None
+    target_table: str | None = None
+    target_column: str | None = None
+    target_data_type: str | None = None
+    target_nullable: bool | None = None
+
     source_system: str | None = None
+    source_dataset: str | None = None
     source_table: str | None = None
     source_column: str | None = None
-    new_logic: str | None = None
+
+    transformation_logic: str | None = None
     business_definition: str | None = None
-    data_type: str | None = None
+    rationale: str | None = None
+    impact_notes: str | None = None
 
 
 class ChangeLine(BaseModel):
     """A change line as stored in the graph + returned via API."""
     id: UUID
     request_id: UUID
-    type: ChangeType
+    category: ChangeCategory
+    action: ChangeAction
+    pipeline_layer: PipelineLayer
     entity: str
-    attribute: str | None = None
-    table: str | None = None
+
+    target_attribute: str | None = None
+    target_dataset: str | None = None
+    target_table: str | None = None
+    target_column: str | None = None
+    target_data_type: str | None = None
+    target_nullable: bool | None = None
+
     source_system: str | None = None
+    source_dataset: str | None = None
     source_table: str | None = None
     source_column: str | None = None
-    new_logic: str | None = None
+
+    transformation_logic: str | None = None
     business_definition: str | None = None
-    data_type: str | None = None
+    rationale: str | None = None
+    impact_notes: str | None = None
+
     classification: Classification
     classification_reason: str | None = None
     catalog_verified: bool | None = None

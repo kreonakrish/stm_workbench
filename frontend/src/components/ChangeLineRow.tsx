@@ -1,23 +1,49 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-export type ChangeType =
-  | "add_attribute"
-  | "change_logic"
+export type ChangeCategory = "ddl" | "dml" | "etl_logic";
+export type PipelineLayer = "ingestion" | "transformation" | "provisioning";
+export type ChangeAction =
+  // DDL
   | "add_table"
-  | "delete_table";
+  | "drop_table"
+  | "add_column"
+  | "drop_column"
+  | "modify_column"
+  // DML
+  | "backfill"
+  | "data_correction"
+  | "delete_historical"
+  // ETL Logic
+  | "new_mapping"
+  | "modify_mapping"
+  | "modify_transformation"
+  | "modify_filter"
+  | "modify_aggregation"
+  | "modify_join";
 
 export interface ChangeLineDraft {
-  type: ChangeType;
+  category: ChangeCategory;
+  action: ChangeAction;
+  pipeline_layer: PipelineLayer;
   entity: string;
-  attribute?: string | null;
-  table?: string | null;
+
+  target_attribute?: string | null;
+  target_dataset?: string | null;
+  target_table?: string | null;
+  target_column?: string | null;
+  target_data_type?: string | null;
+  target_nullable?: boolean | null;
+
   source_system?: string | null;
+  source_dataset?: string | null;
   source_table?: string | null;
   source_column?: string | null;
-  new_logic?: string | null;
+
+  transformation_logic?: string | null;
   business_definition?: string | null;
-  data_type?: string | null;
+  rationale?: string | null;
+  impact_notes?: string | null;
 }
 
 export interface ChangeLineClassified extends ChangeLineDraft {
@@ -66,6 +92,75 @@ const SOURCE_SYSTEMS = [
   { id: "sql_server_origination", label: "SQL Server Origination" },
 ];
 
+const ACTIONS_BY_CATEGORY: Record<ChangeCategory, ChangeAction[]> = {
+  ddl: ["add_table", "drop_table", "add_column", "drop_column", "modify_column"],
+  dml: ["backfill", "data_correction", "delete_historical"],
+  etl_logic: [
+    "new_mapping",
+    "modify_mapping",
+    "modify_transformation",
+    "modify_filter",
+    "modify_aggregation",
+    "modify_join",
+  ],
+};
+
+const ACTION_LABEL: Record<ChangeAction, string> = {
+  add_table: "Add table",
+  drop_table: "Drop table",
+  add_column: "Add column",
+  drop_column: "Drop column",
+  modify_column: "Modify column",
+  backfill: "Backfill",
+  data_correction: "Data correction",
+  delete_historical: "Delete historical",
+  new_mapping: "New mapping",
+  modify_mapping: "Modify mapping",
+  modify_transformation: "Modify transformation",
+  modify_filter: "Modify filter",
+  modify_aggregation: "Modify aggregation",
+  modify_join: "Modify join",
+};
+
+// --- Conditional-display helpers per action ---
+function showsTargetAttribute(a: ChangeAction): boolean {
+  return a !== "add_table" && a !== "drop_table";
+}
+function showsTargetTable(a: ChangeAction): boolean {
+  return a !== "new_mapping" && a !== "modify_mapping";
+}
+function showsTargetDataType(a: ChangeAction): boolean {
+  return a === "add_column" || a === "modify_column";
+}
+function showsTransformationLogic(a: ChangeAction): boolean {
+  return (
+    a === "new_mapping" ||
+    a === "modify_mapping" ||
+    a === "modify_transformation" ||
+    a === "modify_filter" ||
+    a === "modify_aggregation" ||
+    a === "modify_join"
+  );
+}
+function showsSourceSide(a: ChangeAction): boolean {
+  return (
+    a === "add_column" ||
+    a === "modify_column" ||
+    a === "add_table" ||
+    a === "new_mapping" ||
+    a === "modify_mapping" ||
+    a === "modify_transformation" ||
+    a === "modify_filter" ||
+    a === "modify_aggregation" ||
+    a === "modify_join" ||
+    a === "backfill" ||
+    a === "data_correction"
+  );
+}
+function showsBusinessDefinition(a: ChangeAction): boolean {
+  return a === "add_column" || a === "new_mapping";
+}
+
 interface Props {
   index: number;
   value: ChangeLineClassified;
@@ -83,7 +178,6 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
     queryKey: ["ontology-entities"],
     queryFn: fetchEntities,
   });
-
   const attributesQuery = useQuery({
     queryKey: ["ontology-attributes", value.entity],
     queryFn: () => fetchAttributes(value.entity),
@@ -97,11 +191,15 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
     onChange({ ...value, [key]: v });
   }
 
-  const showAttribute =
-    value.type === "add_attribute" || value.type === "change_logic";
-  const showTable = value.type === "add_table" || value.type === "delete_table";
-  const showLogic = value.type === "change_logic";
-  const showAddAttrFields = value.type === "add_attribute";
+  function changeCategory(next: ChangeCategory) {
+    // Auto-pick the first valid action for the new category if the
+    // current action would be inconsistent.
+    const validActions = ACTIONS_BY_CATEGORY[next];
+    const action = validActions.includes(value.action)
+      ? value.action
+      : validActions[0];
+    onChange({ ...value, category: next, action });
+  }
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
@@ -118,26 +216,59 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-600">
-            Type
+            Category
           </label>
           <select
-            value={value.type}
-            onChange={(e) => update("type", e.target.value as ChangeType)}
+            value={value.category}
+            onChange={(e) => changeCategory(e.target.value as ChangeCategory)}
             className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
           >
-            <option value="add_attribute">Add attribute</option>
-            <option value="change_logic">Change logic</option>
-            <option value="add_table">Add table</option>
-            <option value="delete_table">Delete table</option>
+            <option value="ddl">DDL — Schema</option>
+            <option value="dml">DML — Data</option>
+            <option value="etl_logic">ETL Logic</option>
           </select>
         </div>
-
         <div>
           <label className="mb-1 block text-xs font-medium text-gray-600">
-            Entity
+            Action
+          </label>
+          <select
+            value={value.action}
+            onChange={(e) => update("action", e.target.value as ChangeAction)}
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          >
+            {ACTIONS_BY_CATEGORY[value.category].map((a) => (
+              <option key={a} value={a}>
+                {ACTION_LABEL[a]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600">
+            Pipeline layer
+          </label>
+          <select
+            value={value.pipeline_layer}
+            onChange={(e) =>
+              update("pipeline_layer", e.target.value as PipelineLayer)
+            }
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          >
+            <option value="ingestion">Ingestion</option>
+            <option value="transformation">Transformation</option>
+            <option value="provisioning">Provisioning</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600">
+            Business entity
           </label>
           <input
             list={`entity-list-${index}`}
@@ -158,15 +289,17 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
           </datalist>
         </div>
 
-        {showAttribute && (
+        {showsTargetAttribute(value.action) && (
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">
-              Attribute
+              Target attribute (business)
             </label>
             <input
               list={`attribute-list-${index}`}
-              value={value.attribute ?? ""}
-              onChange={(e) => update("attribute", e.target.value)}
+              value={value.target_attribute ?? ""}
+              onChange={(e) =>
+                update("target_attribute", e.target.value || null)
+              }
               placeholder="ssn, current_fico_score, …"
               className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
             />
@@ -179,105 +312,182 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
             </datalist>
           </div>
         )}
-
-        {showTable && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Table
-            </label>
-            <input
-              value={value.table ?? ""}
-              onChange={(e) => update("table", e.target.value)}
-              placeholder="BORROWER, LOAN, …"
-              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
-            />
-          </div>
-        )}
-
-        {showAddAttrFields && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Data type
-            </label>
-            <input
-              value={value.data_type ?? ""}
-              onChange={(e) => update("data_type", e.target.value)}
-              placeholder="string / decimal / integer / date / …"
-              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
-            />
-          </div>
-        )}
       </div>
 
-      {showAddAttrFields && (
-        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+      {/* TARGET (physical) */}
+      <fieldset className="mt-4 rounded-md border border-gray-200 p-3">
+        <legend className="px-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+          Target (physical)
+        </legend>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Source system (optional)
-            </label>
-            <select
-              value={value.source_system ?? ""}
-              onChange={(e) =>
-                update("source_system", e.target.value || null)
-              }
-              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
-            >
-              <option value="">—</option>
-              {SOURCE_SYSTEMS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Source table (optional)
+            <label className="mb-1 block text-xs text-gray-600">
+              Target dataset
             </label>
             <input
-              value={value.source_table ?? ""}
+              value={value.target_dataset ?? ""}
               onChange={(e) =>
-                update("source_table", e.target.value || null)
+                update("target_dataset", e.target.value || null)
               }
-              placeholder="schema.TABLE"
+              placeholder="curated.borrower"
               className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Source column (optional)
-            </label>
-            <input
-              value={value.source_column ?? ""}
-              onChange={(e) =>
-                update("source_column", e.target.value || null)
-              }
-              placeholder="column name"
-              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
-            />
-          </div>
+          {showsTargetTable(value.action) && (
+            <div>
+              <label className="mb-1 block text-xs text-gray-600">
+                Target table
+              </label>
+              <input
+                value={value.target_table ?? ""}
+                onChange={(e) =>
+                  update("target_table", e.target.value || null)
+                }
+                placeholder="BORROWER"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            </div>
+          )}
+          {(value.action === "add_column" ||
+            value.action === "drop_column" ||
+            value.action === "modify_column") && (
+            <div>
+              <label className="mb-1 block text-xs text-gray-600">
+                Target column
+              </label>
+              <input
+                value={value.target_column ?? ""}
+                onChange={(e) =>
+                  update("target_column", e.target.value || null)
+                }
+                placeholder="CURRENT_FICO_SCORE"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            </div>
+          )}
+          {showsTargetDataType(value.action) && (
+            <>
+              <div>
+                <label className="mb-1 block text-xs text-gray-600">
+                  Target data type
+                </label>
+                <input
+                  value={value.target_data_type ?? ""}
+                  onChange={(e) =>
+                    update("target_data_type", e.target.value || null)
+                  }
+                  placeholder="VARCHAR(120) / NUMBER(3) / DECIMAL(12,2) / DATE / …"
+                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 flex items-center gap-2 text-xs text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={value.target_nullable === true}
+                    onChange={(e) =>
+                      update("target_nullable", e.target.checked)
+                    }
+                  />
+                  Nullable
+                </label>
+              </div>
+            </>
+          )}
         </div>
+      </fieldset>
+
+      {/* SOURCE (physical) */}
+      {showsSourceSide(value.action) && (
+        <fieldset className="mt-3 rounded-md border border-gray-200 p-3">
+          <legend className="px-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+            Source (physical)
+          </legend>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs text-gray-600">
+                Source system
+              </label>
+              <select
+                value={value.source_system ?? ""}
+                onChange={(e) =>
+                  update("source_system", e.target.value || null)
+                }
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              >
+                <option value="">—</option>
+                {SOURCE_SYSTEMS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-600">
+                Source dataset / schema
+              </label>
+              <input
+                value={value.source_dataset ?? ""}
+                onChange={(e) =>
+                  update("source_dataset", e.target.value || null)
+                }
+                placeholder="LOAN_DB / ANALYTICS"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-600">
+                Source table
+              </label>
+              <input
+                value={value.source_table ?? ""}
+                onChange={(e) =>
+                  update("source_table", e.target.value || null)
+                }
+                placeholder="BORROWER"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-600">
+                Source column
+              </label>
+              <input
+                value={value.source_column ?? ""}
+                onChange={(e) =>
+                  update("source_column", e.target.value || null)
+                }
+                placeholder="FICO_SCORE"
+                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+              />
+            </div>
+          </div>
+        </fieldset>
       )}
 
-      {showLogic && (
+      {/* LOGIC */}
+      {showsTransformationLogic(value.action) && (
         <div className="mt-3">
           <label className="mb-1 block text-xs font-medium text-gray-600">
-            New logic
+            Transformation logic
           </label>
           <textarea
-            value={value.new_logic ?? ""}
-            onChange={(e) => update("new_logic", e.target.value)}
-            rows={2}
-            placeholder="Describe the proposed logic change"
-            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+            value={value.transformation_logic ?? ""}
+            onChange={(e) =>
+              update("transformation_logic", e.target.value || null)
+            }
+            rows={3}
+            placeholder="Pseudo-SQL or business rule, e.g. CASE WHEN fico < 620 THEN 'subprime' ELSE 'prime' END"
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm"
           />
         </div>
       )}
 
-      {showAddAttrFields && (
+      {showsBusinessDefinition(value.action) && (
         <div className="mt-3">
           <label className="mb-1 block text-xs font-medium text-gray-600">
-            Business definition (optional)
+            Business definition
           </label>
           <textarea
             value={value.business_definition ?? ""}
@@ -290,6 +500,41 @@ export function ChangeLineRow({ index, value, onChange, onRemove }: Props) {
           />
         </div>
       )}
+
+      {/* RATIONALE + IMPACT */}
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600">
+            Rationale
+            {(value.action === "backfill" ||
+              value.action === "data_correction" ||
+              value.action === "delete_historical") && (
+              <span className="ml-1 text-red-600">*</span>
+            )}
+          </label>
+          <textarea
+            value={value.rationale ?? ""}
+            onChange={(e) => update("rationale", e.target.value || null)}
+            rows={2}
+            placeholder="Why is this change needed?"
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-gray-600">
+            Impact notes
+          </label>
+          <textarea
+            value={value.impact_notes ?? ""}
+            onChange={(e) =>
+              update("impact_notes", e.target.value || null)
+            }
+            rows={2}
+            placeholder="Downstream consumers, dashboards, models affected"
+            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+          />
+        </div>
+      </div>
     </div>
   );
 }

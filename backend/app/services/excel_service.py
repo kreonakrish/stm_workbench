@@ -1,15 +1,19 @@
 """Excel intake parser.
 
 Parses an uploaded .xlsx file into a list of `ChangeLineInput` records the
-intake validator can score. The expected sheet shape is one row per change,
-with the following columns (header row required, case-insensitive):
+intake validator can score.
 
-    type | entity | attribute | table | source_system | source_table |
-    source_column | new_logic | business_definition | data_type
+Required headers: `category`, `action`, `pipeline_layer`, `entity` (case-
+insensitive). Optional headers: `target_attribute`, `target_dataset`,
+`target_table`, `target_column`, `target_data_type`, `target_nullable`,
+`source_system`, `source_dataset`, `source_table`, `source_column`,
+`transformation_logic`, `business_definition`, `rationale`,
+`impact_notes`.
 
-Any column missing from the spreadsheet is treated as None for every row.
-Rows with empty type or empty entity are silently skipped — the user is
-expected to clean those up before submitting.
+Rows missing any required field are skipped silently — Excel templates
+tend to have placeholder rows we don't want to surface as errors. Rows
+with unknown `category` or `action` values are skipped the same way; the
+preview-then-submit flow gives users a chance to fix them upstream.
 """
 from __future__ import annotations
 
@@ -18,22 +22,37 @@ from io import BytesIO
 import structlog
 from openpyxl import load_workbook
 
-from app.domain.requests import ChangeLineInput, ChangeType
+from app.domain.requests import (
+    ChangeAction,
+    ChangeCategory,
+    ChangeLineInput,
+    PipelineLayer,
+)
 
 logger = structlog.get_logger(__name__)
 
 _SUPPORTED_COLUMNS = {
-    "type",
+    "category",
+    "action",
+    "pipeline_layer",
     "entity",
-    "attribute",
-    "table",
+    "target_attribute",
+    "target_dataset",
+    "target_table",
+    "target_column",
+    "target_data_type",
+    "target_nullable",
     "source_system",
+    "source_dataset",
     "source_table",
     "source_column",
-    "new_logic",
+    "transformation_logic",
     "business_definition",
-    "data_type",
+    "rationale",
+    "impact_notes",
 }
+
+_REQUIRED = ("category", "action", "pipeline_layer", "entity")
 
 
 class ExcelParseError(ValueError):
@@ -56,12 +75,16 @@ def parse_excel(content: bytes) -> list[ChangeLineInput]:
     headers = [
         (str(h).strip().lower() if h is not None else "") for h in header_row
     ]
-    if "type" not in headers or "entity" not in headers:
+    missing = [h for h in _REQUIRED if h not in headers]
+    if missing:
         raise ExcelParseError(
-            "Header row must include at minimum 'type' and 'entity' columns"
+            f"Header row must include required columns: {', '.join(missing)}"
         )
 
-    valid_types = {t.value for t in ChangeType}
+    valid_categories = {c.value for c in ChangeCategory}
+    valid_actions = {a.value for a in ChangeAction}
+    valid_layers = {p.value for p in PipelineLayer}
+
     items: list[ChangeLineInput] = []
 
     for raw in rows:
@@ -75,25 +98,40 @@ def parse_excel(content: bytes) -> list[ChangeLineInput]:
             else:
                 record[header] = str(value).strip()
 
-        if not record.get("type") or not record.get("entity"):
+        if any(not record.get(h) for h in _REQUIRED):
             continue
-        if record["type"] not in valid_types:
-            # Skip rather than error — we'll surface invalid rows in
-            # validation if/when we extend this to return per-row diagnostics.
+        if (
+            record["category"] not in valid_categories
+            or record["action"] not in valid_actions
+            or record["pipeline_layer"] not in valid_layers
+        ):
             continue
+
+        nullable_raw = record.get("target_nullable")
+        target_nullable: bool | None = None
+        if nullable_raw is not None:
+            target_nullable = nullable_raw.lower() in ("true", "1", "yes", "y")
 
         items.append(
             ChangeLineInput(
-                type=ChangeType(record["type"]),
+                category=ChangeCategory(record["category"]),
+                action=ChangeAction(record["action"]),
+                pipeline_layer=PipelineLayer(record["pipeline_layer"]),
                 entity=record["entity"] or "",
-                attribute=record.get("attribute"),
-                table=record.get("table"),
+                target_attribute=record.get("target_attribute"),
+                target_dataset=record.get("target_dataset"),
+                target_table=record.get("target_table"),
+                target_column=record.get("target_column"),
+                target_data_type=record.get("target_data_type"),
+                target_nullable=target_nullable,
                 source_system=record.get("source_system"),
+                source_dataset=record.get("source_dataset"),
                 source_table=record.get("source_table"),
                 source_column=record.get("source_column"),
-                new_logic=record.get("new_logic"),
+                transformation_logic=record.get("transformation_logic"),
                 business_definition=record.get("business_definition"),
-                data_type=record.get("data_type"),
+                rationale=record.get("rationale"),
+                impact_notes=record.get("impact_notes"),
             )
         )
 

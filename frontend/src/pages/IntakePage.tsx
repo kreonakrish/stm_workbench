@@ -60,9 +60,10 @@ async function createRequest(payload: CreatePayload) {
 }
 
 const EMPTY_LINE: ChangeLineDraft = {
-  type: "add_attribute",
+  category: "ddl",
+  action: "add_column",
+  pipeline_layer: "transformation",
   entity: "",
-  attribute: "",
 };
 
 export function IntakePage() {
@@ -319,15 +320,23 @@ export function IntakePage() {
 
 function stripClassification(it: ChangeLineClassified): ChangeLineDraft {
   return {
-    type: it.type,
+    category: it.category,
+    action: it.action,
+    pipeline_layer: it.pipeline_layer,
     entity: it.entity,
-    attribute: it.attribute ?? null,
-    table: it.table ?? null,
+    target_attribute: it.target_attribute ?? null,
+    target_dataset: it.target_dataset ?? null,
+    target_table: it.target_table ?? null,
+    target_column: it.target_column ?? null,
+    target_data_type: it.target_data_type ?? null,
+    target_nullable: it.target_nullable ?? null,
     source_system: it.source_system ?? null,
+    source_dataset: it.source_dataset ?? null,
     source_table: it.source_table ?? null,
     source_column: it.source_column ?? null,
-    new_logic: it.new_logic ?? null,
+    transformation_logic: it.transformation_logic ?? null,
     business_definition: it.business_definition ?? null,
-    data_type: it.data_type ?? null,
+    rationale: it.rationale ?? null,
+    impact_notes: it.impact_notes ?? null,
   };
 }
