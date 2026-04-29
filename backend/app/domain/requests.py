@@ -19,6 +19,10 @@ class UsageContext(str, Enum):
     MANAGEMENT = "management"
     ANALYTICS = "analytics"
     ADHOC = "adhoc"
+    CAPITAL_MARKETS = "capital_markets"
+    FINANCE = "finance"
+    REDS = "reds"
+    RISK = "risk"
 
 
 class ConsumptionPattern(str, Enum):

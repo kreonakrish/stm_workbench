@@ -196,6 +196,10 @@ export function IntakePage() {
                 <option value="management">Management</option>
                 <option value="analytics">Analytics</option>
                 <option value="adhoc">Ad hoc</option>
+                <option value="capital_markets">Capital Markets</option>
+                <option value="finance">Finance</option>
+                <option value="reds">REDS (Regulatory External Data Services)</option>
+                <option value="risk">Risk</option>
               </select>
             </div>
             <div>
