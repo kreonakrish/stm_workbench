@@ -27,26 +27,26 @@ See `/docs/adr/` for foundational decisions.
 docker compose up -d        # Redis only
 ```
 
-Redis runs on `localhost:6379`. Neo4j is **not** in docker-compose — start your
+Redis runs on `localhost:46379`. Neo4j is **not** in docker-compose — start your
 local Neo4j separately and confirm it's reachable at http://localhost:7474.
 Set `NEO4J_PASSWORD` in your `backend/.env` (copy from `.env.example`).
 
 ### 2. Backend
 ```bash
 cd backend
-uv sync                                  # install deps
-uv run python -m app.graph.migrations    # apply schema
-uv run uvicorn app.main:app --reload     # serve on :8000
+uv sync                                                       # install deps
+uv run python -m app.graph.migrations                         # apply schema
+uv run uvicorn app.main:app --host 127.0.0.1 --port 48000     # serve on :48000
 ```
 
-OpenAPI docs at http://localhost:8000/docs.
+OpenAPI docs at http://127.0.0.1:48000/docs.
 
 ### 3. Frontend
 ```bash
 cd frontend
 npm install
 npm run generate-api    # regenerate TypeScript client from OpenAPI
-npm run dev             # serve on :5173
+npm run dev             # serve on :45173
 ```
 
 ### 4. Tests

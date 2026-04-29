@@ -30,18 +30,18 @@ class Settings(BaseSettings):
     neo4j_max_connection_pool_size: int = 50
 
     # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://localhost:46379/0"
 
     # Auth (placeholder; replaced with real SSO in T-053)
     jwt_secret: str = "dev-secret-replace-in-prod"
     jwt_algorithm: str = "HS256"
 
     # CORS
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:45173"])
 
     # Celery
-    celery_broker_url: str = "redis://localhost:6379/1"
-    celery_result_backend: str = "redis://localhost:6379/2"
+    celery_broker_url: str = "redis://localhost:46379/1"
+    celery_result_backend: str = "redis://localhost:46379/2"
 
 
 @lru_cache(maxsize=1)

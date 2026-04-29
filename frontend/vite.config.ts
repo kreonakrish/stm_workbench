@@ -10,12 +10,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 45173,
     proxy: {
       // 127.0.0.1 explicitly: on Windows + Node 17+, "localhost" can
       // resolve to ::1 first and miss a uvicorn bound only to 127.0.0.1.
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:48000",
         changeOrigin: true,
       },
     },
