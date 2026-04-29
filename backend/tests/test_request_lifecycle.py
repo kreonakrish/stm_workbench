@@ -88,3 +88,50 @@ async def test_invalid_transition_rejected(client: AsyncClient) -> None:
 async def test_get_nonexistent_request_returns_404(client: AsyncClient) -> None:
     response = await client.get("/api/v1/requests/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_request_with_items_classifies_and_persists(
+    client: AsyncClient,
+) -> None:
+    response = await client.post(
+        "/api/v1/requests",
+        json={
+            "title": "Mixed bag",
+            "business_question": "Test that classification flows through to storage",
+            "usage_context": "analytics",
+            "consumption_pattern": "report",
+            "template_id": "default",
+            "items": [
+                {
+                    "type": "add_attribute",
+                    "entity": "Borrower",
+                    "attribute": "ssn",
+                },
+                {
+                    "type": "add_attribute",
+                    "entity": "Borrower",
+                    "attribute": "twitter_handle",
+                },
+                {
+                    "type": "change_logic",
+                    "entity": "Borrower",
+                    "attribute": "current_fico_score",
+                    "new_logic": "weekly bureau pull",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    items = {it["attribute"]: it for it in body["items"]}
+    assert items["ssn"]["classification"] == "exists"
+    assert items["twitter_handle"]["classification"] == "net_new"
+    assert items["current_fico_score"]["classification"] == "needs_change"
+
+    # Refetch — items must round-trip from the graph identically.
+    fetch = await client.get(f"/api/v1/requests/{body['id']}")
+    assert fetch.status_code == 200
+    refetched = {it["attribute"]: it for it in fetch.json()["items"]}
+    assert refetched["ssn"]["classification"] == "exists"
+    assert refetched["twitter_handle"]["classification"] == "net_new"

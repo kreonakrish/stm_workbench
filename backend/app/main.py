@@ -13,7 +13,14 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, ontology, requests as requests_router, workflow
+from app.api import (
+    crawler,
+    health,
+    intake,
+    ontology,
+    requests as requests_router,
+    workflow,
+)
 from app.config import get_settings
 from app.graph.driver import close_driver, get_driver
 from app.middleware import RequestIdMiddleware
@@ -83,6 +90,8 @@ def create_app() -> FastAPI:
     app.include_router(requests_router.router, prefix="/api/v1", tags=["requests"])
     app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
     app.include_router(workflow.router, prefix="/api/v1", tags=["workflow"])
+    app.include_router(intake.router, prefix="/api/v1", tags=["intake"])
+    app.include_router(crawler.router, prefix="/api/v1", tags=["crawler"])
 
     return app
 

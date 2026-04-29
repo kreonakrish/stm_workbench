@@ -28,6 +28,66 @@ class ConsumptionPattern(str, Enum):
     DASHBOARD = "dashboard"
 
 
+class ChangeType(str, Enum):
+    ADD_ATTRIBUTE = "add_attribute"
+    CHANGE_LOGIC = "change_logic"
+    ADD_TABLE = "add_table"
+    DELETE_TABLE = "delete_table"
+
+
+class Classification(str, Enum):
+    """How a change line resolved against the ontology + physical sources."""
+    EXISTS = "exists"            # ontology already has this attribute/table
+    NET_NEW = "net_new"          # nothing matches; truly new
+    NEEDS_CHANGE = "needs_change"  # exists but the user wants to change its logic
+    INVALID = "invalid"          # references non-existent target (e.g. change_logic on
+                                 # an attribute that doesn't exist)
+
+
+class ChangeLineInput(BaseModel):
+    """Input form of a change line, sent on intake.
+
+    Not every field is required for every type:
+      add_attribute  : entity, attribute, business_definition (recommended),
+                       data_type, optional source_system/table/column
+      change_logic   : entity, attribute, new_logic
+      add_table      : entity, table, source_system
+      delete_table   : entity, table, source_system
+    Validation runs after persistence; the API does not reject under-filled
+    rows here so the user can save a draft and refine.
+    """
+    type: ChangeType
+    entity: str
+    attribute: str | None = None
+    table: str | None = None
+    source_system: str | None = None
+    source_table: str | None = None
+    source_column: str | None = None
+    new_logic: str | None = None
+    business_definition: str | None = None
+    data_type: str | None = None
+
+
+class ChangeLine(BaseModel):
+    """A change line as stored in the graph + returned via API."""
+    id: UUID
+    request_id: UUID
+    type: ChangeType
+    entity: str
+    attribute: str | None = None
+    table: str | None = None
+    source_system: str | None = None
+    source_table: str | None = None
+    source_column: str | None = None
+    new_logic: str | None = None
+    business_definition: str | None = None
+    data_type: str | None = None
+    classification: Classification
+    classification_reason: str | None = None
+    catalog_verified: bool | None = None
+    existing_sources: list[str] = Field(default_factory=list)
+
+
 class StageName(str, Enum):
     INTAKE = "intake"
     DISCOVERY = "discovery"
@@ -65,6 +125,7 @@ class CreateRequestInput(BaseModel):
     consumption_pattern: ConsumptionPattern
     deadline: datetime | None = None
     template_id: str = "default"
+    items: list[ChangeLineInput] = Field(default_factory=list)
 
 
 class Request(BaseModel):
@@ -80,6 +141,7 @@ class Request(BaseModel):
     current_stage_name: str
     created_at: datetime
     recent_events: list[TransitionEvent] = Field(default_factory=list)
+    items: list[ChangeLine] = Field(default_factory=list)
 
 
 class TransitionInput(BaseModel):

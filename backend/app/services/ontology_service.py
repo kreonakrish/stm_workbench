@@ -117,21 +117,43 @@ class OntologyService:
         ]
 
 
+    async def list_entities(self) -> list[dict]:
+        """All curated entities with attribute counts. Used by the entity-picker."""
+        driver = get_driver()
+        async with driver.session(database=get_settings().neo4j_database) as session:
+            result = await session.run(get_query("list_entities"))
+            return [r.data() async for r in result]
+
+    async def list_attributes(self, entity: str) -> list[dict]:
+        """All BusinessAttributes attached to a given entity."""
+        driver = get_driver()
+        async with driver.session(database=get_settings().neo4j_database) as session:
+            result = await session.run(
+                get_query("list_attributes_for_entity"), entity=entity
+            )
+            return [r.data() async for r in result]
+
     async def search(
         self, *, query: str, cursor: str | None = None, limit: int = 20
     ) -> SearchResponse:
-        """Typeahead over labels and their indexed properties.
+        """Typeahead over curated :BusinessAttribute and :Entity nodes.
 
         Empty query returns no hits. Ranking: exact > prefix > substring on
-        property name first, then the same on label name. Properties with
-        unique-key constraints rank slightly higher within their tier.
+        the attribute / entity name. Attribute hits beat entity hits within
+        the same tier; key-flagged attributes rank slightly higher.
         """
         if not query.strip():
             return SearchResponse(hits=[], next_cursor=None)
 
-        schema = await self.get_schema()
-        hits = self._rank_hits(schema, query.strip().lower())
+        q = query.strip().lower()
+        driver = get_driver()
+        async with driver.session(database=get_settings().neo4j_database) as session:
+            result = await session.run(
+                get_query("ontology_search_attributes"), q=q
+            )
+            raw = [r.data() async for r in result]
 
+        hits = self._rank_hits(raw, q)
         offset = _decode_cursor(cursor) if cursor else 0
         page = hits[offset : offset + limit]
         next_offset = offset + limit
@@ -139,15 +161,12 @@ class OntologyService:
         return SearchResponse(hits=page, next_cursor=next_cursor)
 
     @staticmethod
-    def _rank_hits(schema: OntologySchema, q: str) -> list[SearchHit]:
-        """Score every (label, property) pair against `q` and return ordered hits.
+    def _rank_hits(rows: list[dict], q: str) -> list[SearchHit]:
+        """Score (entity, attribute) pairs and return them in best-first order."""
 
-        Lower score = better match. Properties beat labels when the user is
-        looking for a field. Within each tier, exact match wins, then prefix,
-        then substring.
-        """
-
-        def score_string(s: str, term: str) -> int | None:
+        def score(s: str | None, term: str) -> int | None:
+            if not s:
+                return None
             s = s.lower()
             if s == term:
                 return 0
@@ -158,34 +177,50 @@ class OntologyService:
             return None
 
         scored: list[tuple[int, str, SearchHit]] = []
-        for label in schema.labels:
-            for prop in label.properties:
-                ps = score_string(prop.name, q)
-                if ps is not None:
-                    bonus = -1 if prop.unique else 0
-                    scored.append(
-                        (
-                            ps * 2 + bonus,
-                            f"{label.name}.{prop.name}",
-                            SearchHit(
-                                label=label.name,
-                                property=prop.name,
-                                display=f"{label.name}.{prop.name}",
-                                unique=prop.unique,
-                            ),
-                        )
-                    )
-            ls = score_string(label.name, q)
-            if ls is not None:
+        for row in rows:
+            entity = row.get("entity")
+            if not entity:
+                continue
+            attribute = row.get("attribute")
+            if attribute:
+                s = score(attribute, q)
+                if s is None:
+                    continue
+                bonus = -1 if row.get("is_key") else 0
+                display = f"{entity}.{attribute}"
                 scored.append(
                     (
-                        ls * 2 + 10,  # property hits beat label hits
-                        label.name,
-                        SearchHit(label=label.name, display=label.name),
+                        s * 2 + bonus,
+                        display,
+                        SearchHit(
+                            label=entity,
+                            property=attribute,
+                            display=display,
+                            unique=bool(row.get("is_key")),
+                        ),
+                    )
+                )
+            else:
+                s = score(entity, q)
+                if s is None:
+                    continue
+                scored.append(
+                    (
+                        s * 2 + 10,  # entity hits ranked below attribute hits
+                        entity,
+                        SearchHit(label=entity, display=entity),
                     )
                 )
         scored.sort(key=lambda t: (t[0], t[1]))
-        return [hit for _, _, hit in scored]
+        # Dedupe on display in case the cypher UNION emitted duplicates
+        seen: set[str] = set()
+        out: list[SearchHit] = []
+        for _, display, hit in scored:
+            if display in seen:
+                continue
+            seen.add(display)
+            out.append(hit)
+        return out
 
 
 def get_ontology_service() -> OntologyService:
