@@ -77,7 +77,7 @@ async def _per_test_cleanup() -> AsyncIterator[None]:
         driver = get_driver()
         async with driver.session(database=get_settings().neo4j_database) as session:
             await session.run(
-                "MATCH (n) WHERE n:Request OR n:STMTransitionEvent DETACH DELETE n"
+                "MATCH (n) WHERE n:Request OR n:STMTransitionEvent OR n:ChangeLine OR n:ChangeColumn DETACH DELETE n"
             )
     except Exception:
         # Driver may not have been initialized if the test never touched the DB.

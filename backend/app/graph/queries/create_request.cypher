@@ -1,18 +1,21 @@
-// Create a new :Request node, link to its initial stage, and persist any
-// :ChangeLine items submitted with the request. Uses :STM* namespaced
-// workflow labels per ADR 0006.
+// Create a new :Request node, link to its initial stage, persist any
+// :ChangeLine items and their per-line :ChangeColumn children. Uses
+// :STM* namespaced workflow labels per ADR 0006.
 //
 // Parameters:
 //   request_id, title, business_question, usage_context,
 //   consumption_pattern, deadline, requester_id, template_id,
-//   items: list of {id, category, action, pipeline_layer, entity,
-//                   target_attribute, target_dataset, target_table,
-//                   target_column, target_data_type, target_nullable,
-//                   source_system, source_dataset, source_table,
-//                   source_column, transformation_logic,
-//                   business_definition, rationale, impact_notes,
-//                   classification, classification_reason,
-//                   catalog_verified, existing_sources}
+//   items: list of {
+//     id, category, action, pipeline_layer, entity,
+//     target_dataset, target_table,
+//     source_system, source_dataset, source_table, source_column,
+//     transformation_logic, rationale, impact_notes,
+//     classification, classification_reason, catalog_verified,
+//     columns: list of {
+//       id, attribute, data_type, nullable, business_definition,
+//       classification, classification_reason, existing_sources
+//     }
+//   }
 
 MATCH (template:STMWorkflowTemplate {id: $template_id})-[:HAS_STAGE]->(initial:STMStage {is_initial: true})
 CREATE (r:Request {
@@ -48,25 +51,35 @@ CREATE (cl:ChangeLine {
     action: item.action,
     pipeline_layer: item.pipeline_layer,
     entity: item.entity,
-    target_attribute: item.target_attribute,
     target_dataset: item.target_dataset,
     target_table: item.target_table,
-    target_column: item.target_column,
-    target_data_type: item.target_data_type,
-    target_nullable: item.target_nullable,
     source_system: item.source_system,
     source_dataset: item.source_dataset,
     source_table: item.source_table,
     source_column: item.source_column,
     transformation_logic: item.transformation_logic,
-    business_definition: item.business_definition,
     rationale: item.rationale,
     impact_notes: item.impact_notes,
     classification: item.classification,
     classification_reason: item.classification_reason,
     catalog_verified: item.catalog_verified,
-    existing_sources: item.existing_sources,
     created_at: datetime()
 })
 CREATE (r)-[:HAS_CHANGE]->(cl)
-RETURN r;
+WITH cl, item
+UNWIND range(0, size(item.columns) - 1) AS col_index
+WITH cl, item.columns[col_index] AS col, col_index
+CREATE (c:ChangeColumn {
+    id: col.id,
+    change_line_id: cl.id,
+    position: col_index,
+    attribute: col.attribute,
+    data_type: col.data_type,
+    nullable: col.nullable,
+    business_definition: col.business_definition,
+    classification: col.classification,
+    classification_reason: col.classification_reason,
+    existing_sources: col.existing_sources
+})
+CREATE (cl)-[:HAS_COLUMN]->(c)
+RETURN count(cl) AS line_count;

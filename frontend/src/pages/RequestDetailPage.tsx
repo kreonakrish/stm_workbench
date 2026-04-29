@@ -5,30 +5,36 @@ import { ClassificationBadge } from "../components/ClassificationBadge";
 
 type Classification = "exists" | "net_new" | "needs_change" | "invalid";
 
+interface ChangeColumn {
+  id: string;
+  attribute: string;
+  data_type: string | null;
+  nullable: boolean | null;
+  business_definition: string | null;
+  classification: Classification;
+  classification_reason: string | null;
+  existing_sources: string[];
+}
+
 interface ChangeLine {
   id: string;
   category: string;
   action: string;
   pipeline_layer: string;
   entity: string;
-  target_attribute: string | null;
+  target_columns: ChangeColumn[];
   target_dataset: string | null;
   target_table: string | null;
-  target_column: string | null;
-  target_data_type: string | null;
-  target_nullable: boolean | null;
   source_system: string | null;
   source_dataset: string | null;
   source_table: string | null;
   source_column: string | null;
   transformation_logic: string | null;
-  business_definition: string | null;
   rationale: string | null;
   impact_notes: string | null;
   classification: Classification;
   classification_reason: string | null;
   catalog_verified: boolean | null;
-  existing_sources: string[];
 }
 
 interface Request {
@@ -78,12 +84,6 @@ const LAYER_LABEL: Record<string, string> = {
   provisioning: "Provisioning",
 };
 
-function describe(item: ChangeLine): string {
-  const parts: string[] = [item.entity];
-  if (item.target_attribute) parts.push(item.target_attribute);
-  return parts.join(".");
-}
-
 function sourcePath(item: ChangeLine): string | null {
   if (!item.source_system) return null;
   return [
@@ -97,9 +97,7 @@ function sourcePath(item: ChangeLine): string | null {
 }
 
 function targetPath(item: ChangeLine): string | null {
-  const parts = [item.target_dataset, item.target_table, item.target_column].filter(
-    Boolean,
-  );
+  const parts = [item.target_dataset, item.target_table].filter(Boolean);
   return parts.length > 0 ? parts.join(".") : null;
 }
 
@@ -174,8 +172,15 @@ export function RequestDetailPage() {
                     <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-800">
                       {LAYER_LABEL[item.pipeline_layer] ?? item.pipeline_layer}
                     </span>
-                    <span className="font-mono text-sm text-gray-900">
-                      {describe(item)}
+                    <span className="text-sm text-gray-900">
+                      <span className="font-mono">{item.entity}</span>
+                      {item.target_columns.length > 0 && (
+                        <span className="text-gray-500">
+                          {" "}
+                          · {item.target_columns.length} column
+                          {item.target_columns.length === 1 ? "" : "s"}
+                        </span>
+                      )}
                     </span>
                     <ClassificationBadge
                       classification={item.classification}
@@ -204,12 +209,6 @@ export function RequestDetailPage() {
                       <div>
                         <span className="text-gray-500">Target: </span>
                         <span className="font-mono text-gray-800">{tgt}</span>
-                        {item.target_data_type && (
-                          <span className="ml-1 text-gray-600">
-                            ({item.target_data_type}
-                            {item.target_nullable === false ? " NOT NULL" : ""})
-                          </span>
-                        )}
                       </div>
                     )}
                     {src && (
@@ -218,15 +217,61 @@ export function RequestDetailPage() {
                         <span className="font-mono text-gray-800">{src}</span>
                       </div>
                     )}
-                    {item.existing_sources.length > 0 && (
-                      <div className="md:col-span-2">
-                        <span className="text-gray-500">Existing sources: </span>
-                        <span className="font-mono text-gray-700">
-                          {item.existing_sources.join(", ")}
-                        </span>
-                      </div>
-                    )}
                   </div>
+
+                  {item.target_columns.length > 0 && (
+                    <div className="mt-3 overflow-hidden rounded-md border border-gray-200 bg-white">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 text-gray-600">
+                            <th className="px-3 py-1.5 text-left font-medium">
+                              Attribute
+                            </th>
+                            <th className="px-3 py-1.5 text-left font-medium">
+                              Type
+                            </th>
+                            <th className="px-3 py-1.5 text-left font-medium">
+                              Status
+                            </th>
+                            <th className="px-3 py-1.5 text-left font-medium">
+                              Reason / sources
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.target_columns.map((col) => (
+                            <tr key={col.id} className="border-t border-gray-100">
+                              <td className="px-3 py-1.5 font-mono text-gray-900">
+                                {col.attribute}
+                              </td>
+                              <td className="px-3 py-1.5 font-mono text-gray-600">
+                                {col.data_type ?? "—"}
+                                {col.nullable === false && (
+                                  <span className="ml-1 text-gray-400">
+                                    NOT NULL
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <ClassificationBadge
+                                  classification={col.classification}
+                                  reason={col.classification_reason}
+                                />
+                              </td>
+                              <td className="px-3 py-1.5 text-gray-600">
+                                {col.classification_reason ?? ""}
+                                {col.existing_sources.length > 0 && (
+                                  <div className="mt-0.5 font-mono text-[10px] text-gray-500">
+                                    {col.existing_sources.join(", ")}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
                   {item.transformation_logic && (
                     <div className="mt-2 rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-800">
@@ -234,14 +279,6 @@ export function RequestDetailPage() {
                         Transformation:{" "}
                       </span>
                       {item.transformation_logic}
-                    </div>
-                  )}
-                  {item.business_definition && (
-                    <div className="mt-2 text-xs text-gray-700">
-                      <span className="font-medium text-gray-600">
-                        Business definition:{" "}
-                      </span>
-                      {item.business_definition}
                     </div>
                   )}
                   {item.rationale && (

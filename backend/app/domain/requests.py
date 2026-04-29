@@ -86,13 +86,34 @@ class Classification(str, Enum):
     INVALID = "invalid"
 
 
+class TargetColumnSpec(BaseModel):
+    """One target column inside a change line.
+
+    A change line carries a list of these — a DDL `add_column` line, for
+    example, can declare several new columns in a single batch.
+    """
+    attribute: str
+    data_type: str | None = None
+    nullable: bool | None = None
+    business_definition: str | None = None
+
+
+class ClassifiedColumn(TargetColumnSpec):
+    """A TargetColumnSpec with the validation result attached."""
+    id: UUID
+    classification: Classification
+    classification_reason: str | None = None
+    existing_sources: list[str] = Field(default_factory=list)
+
+
 class ChangeLineInput(BaseModel):
     """Input form of a structured change line, sent on intake.
 
     Required fields are category, action, pipeline_layer, entity. Other
-    fields are conditional — DDL column actions need target_column +
-    target_data_type; ETL_LOGIC actions need transformation_logic; DML
-    actions usually need source/target tables and a rationale.
+    fields are conditional — DDL column actions need at least one
+    target_columns entry with attribute + data_type; ETL_LOGIC actions
+    need transformation_logic; DML actions usually need source/target
+    tables and a rationale.
 
     Validation runs server-side after persistence; the API does not reject
     under-filled rows here so the user can save a draft and refine.
@@ -102,12 +123,10 @@ class ChangeLineInput(BaseModel):
     pipeline_layer: PipelineLayer
     entity: str
 
-    target_attribute: str | None = None
+    target_columns: list[TargetColumnSpec] = Field(default_factory=list)
+
     target_dataset: str | None = None
     target_table: str | None = None
-    target_column: str | None = None
-    target_data_type: str | None = None
-    target_nullable: bool | None = None
 
     source_system: str | None = None
     source_dataset: str | None = None
@@ -115,13 +134,17 @@ class ChangeLineInput(BaseModel):
     source_column: str | None = None
 
     transformation_logic: str | None = None
-    business_definition: str | None = None
     rationale: str | None = None
     impact_notes: str | None = None
 
 
 class ChangeLine(BaseModel):
-    """A change line as stored in the graph + returned via API."""
+    """A change line as stored in the graph + returned via API.
+
+    `target_columns` carries per-column classification; the line-level
+    `classification` is the worst-case roll-up of the column results
+    (invalid > needs_change > net_new > exists).
+    """
     id: UUID
     request_id: UUID
     category: ChangeCategory
@@ -129,12 +152,10 @@ class ChangeLine(BaseModel):
     pipeline_layer: PipelineLayer
     entity: str
 
-    target_attribute: str | None = None
+    target_columns: list[ClassifiedColumn] = Field(default_factory=list)
+
     target_dataset: str | None = None
     target_table: str | None = None
-    target_column: str | None = None
-    target_data_type: str | None = None
-    target_nullable: bool | None = None
 
     source_system: str | None = None
     source_dataset: str | None = None
@@ -142,14 +163,12 @@ class ChangeLine(BaseModel):
     source_column: str | None = None
 
     transformation_logic: str | None = None
-    business_definition: str | None = None
     rationale: str | None = None
     impact_notes: str | None = None
 
     classification: Classification
     classification_reason: str | None = None
     catalog_verified: bool | None = None
-    existing_sources: list[str] = Field(default_factory=list)
 
 
 class StageName(str, Enum):

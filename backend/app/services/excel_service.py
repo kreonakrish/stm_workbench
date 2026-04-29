@@ -5,10 +5,14 @@ intake validator can score.
 
 Required headers: `category`, `action`, `pipeline_layer`, `entity` (case-
 insensitive). Optional headers: `target_attribute`, `target_dataset`,
-`target_table`, `target_column`, `target_data_type`, `target_nullable`,
-`source_system`, `source_dataset`, `source_table`, `source_column`,
+`target_table`, `target_data_type`, `target_nullable`, `source_system`,
+`source_dataset`, `source_table`, `source_column`,
 `transformation_logic`, `business_definition`, `rationale`,
 `impact_notes`.
+
+Each row maps to one ChangeLineInput with at most one TargetColumnSpec
+(populated when `target_attribute` is set). Multi-column change lines
+are authored in the UI editor or via the JSON API.
 
 Rows missing any required field are skipped silently — Excel templates
 tend to have placeholder rows we don't want to surface as errors. Rows
@@ -27,6 +31,7 @@ from app.domain.requests import (
     ChangeCategory,
     ChangeLineInput,
     PipelineLayer,
+    TargetColumnSpec,
 )
 
 logger = structlog.get_logger(__name__)
@@ -39,7 +44,6 @@ _SUPPORTED_COLUMNS = {
     "target_attribute",
     "target_dataset",
     "target_table",
-    "target_column",
     "target_data_type",
     "target_nullable",
     "source_system",
@@ -112,24 +116,31 @@ def parse_excel(content: bytes) -> list[ChangeLineInput]:
         if nullable_raw is not None:
             target_nullable = nullable_raw.lower() in ("true", "1", "yes", "y")
 
+        target_columns: list[TargetColumnSpec] = []
+        if record.get("target_attribute"):
+            target_columns.append(
+                TargetColumnSpec(
+                    attribute=record["target_attribute"] or "",
+                    data_type=record.get("target_data_type"),
+                    nullable=target_nullable,
+                    business_definition=record.get("business_definition"),
+                )
+            )
+
         items.append(
             ChangeLineInput(
                 category=ChangeCategory(record["category"]),
                 action=ChangeAction(record["action"]),
                 pipeline_layer=PipelineLayer(record["pipeline_layer"]),
                 entity=record["entity"] or "",
-                target_attribute=record.get("target_attribute"),
+                target_columns=target_columns,
                 target_dataset=record.get("target_dataset"),
                 target_table=record.get("target_table"),
-                target_column=record.get("target_column"),
-                target_data_type=record.get("target_data_type"),
-                target_nullable=target_nullable,
                 source_system=record.get("source_system"),
                 source_dataset=record.get("source_dataset"),
                 source_table=record.get("source_table"),
                 source_column=record.get("source_column"),
                 transformation_logic=record.get("transformation_logic"),
-                business_definition=record.get("business_definition"),
                 rationale=record.get("rationale"),
                 impact_notes=record.get("impact_notes"),
             )

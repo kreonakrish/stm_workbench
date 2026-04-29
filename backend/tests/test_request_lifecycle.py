@@ -108,23 +108,17 @@ async def test_create_request_with_items_classifies_and_persists(
                     "action": "add_column",
                     "pipeline_layer": "transformation",
                     "entity": "Borrower",
-                    "target_attribute": "ssn",
-                    "target_data_type": "VARCHAR(11)",
-                },
-                {
-                    "category": "ddl",
-                    "action": "add_column",
-                    "pipeline_layer": "transformation",
-                    "entity": "Borrower",
-                    "target_attribute": "twitter_handle",
-                    "target_data_type": "STRING",
+                    "target_columns": [
+                        {"attribute": "ssn", "data_type": "VARCHAR(11)"},
+                        {"attribute": "twitter_handle", "data_type": "STRING"},
+                    ],
                 },
                 {
                     "category": "etl_logic",
                     "action": "modify_transformation",
                     "pipeline_layer": "transformation",
                     "entity": "Borrower",
-                    "target_attribute": "current_fico_score",
+                    "target_columns": [{"attribute": "current_fico_score"}],
                     "transformation_logic": "weekly bureau pull",
                 },
             ],
@@ -132,17 +126,28 @@ async def test_create_request_with_items_classifies_and_persists(
     )
     assert response.status_code == 201
     body = response.json()
-    items = {it["target_attribute"]: it for it in body["items"]}
-    assert items["ssn"]["classification"] == "exists"
-    assert items["twitter_handle"]["classification"] == "net_new"
-    assert items["current_fico_score"]["classification"] == "needs_change"
+    assert len(body["items"]) == 2
 
-    # Refetch — items must round-trip from the graph identically.
+    # First line has 2 columns: 1 exists + 1 net_new → line classification net_new
+    multi_col = body["items"][0]
+    assert multi_col["classification"] == "net_new"
+    cols = {c["attribute"]: c["classification"] for c in multi_col["target_columns"]}
+    assert cols["ssn"] == "exists"
+    assert cols["twitter_handle"] == "net_new"
+
+    # Second line — modify_transformation on existing column → needs_change
+    txform = body["items"][1]
+    assert txform["classification"] == "needs_change"
+    assert txform["target_columns"][0]["attribute"] == "current_fico_score"
+
+    # Refetch — items + columns must round-trip from the graph identically.
     fetch = await client.get(f"/api/v1/requests/{body['id']}")
     assert fetch.status_code == 200
-    refetched = {it["target_attribute"]: it for it in fetch.json()["items"]}
-    assert refetched["ssn"]["classification"] == "exists"
-    assert refetched["twitter_handle"]["classification"] == "net_new"
-    assert refetched["ssn"]["category"] == "ddl"
-    assert refetched["ssn"]["action"] == "add_column"
-    assert refetched["current_fico_score"]["action"] == "modify_transformation"
+    refetched = fetch.json()["items"]
+    assert len(refetched) == 2
+    refetched_cols = [
+        c["attribute"] for c in refetched[0]["target_columns"]
+    ]
+    assert set(refetched_cols) == {"ssn", "twitter_handle"}
+    assert refetched[1]["target_columns"][0]["attribute"] == "current_fico_score"
+    assert refetched[1]["action"] == "modify_transformation"

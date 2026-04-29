@@ -1,37 +1,25 @@
-"""Validation service — classifies a ChangeLine against the ontology and
-external catalog.
+"""Validation service — classifies a ChangeLine (and each of its target
+columns) against the ontology + external catalog.
 
-Each change line gets:
-  1. classification (exists / net_new / needs_change / invalid),
-  2. existing physical sources for any referenced ontology attribute,
-  3. catalog confirmation for any user-supplied source location.
+Each line's `target_columns` carries its own per-column classification.
+The line-level classification is the worst-case roll-up:
 
-Classification semantics, by category:
+    invalid > needs_change > net_new > exists
 
-  DDL
-    ADD_COLUMN     — exists if (entity, target_attribute) already in
-                     ontology; net_new otherwise.
-    MODIFY_COLUMN  — needs_change if attribute exists; invalid otherwise.
-    DROP_COLUMN    — needs_change if attribute exists; invalid otherwise.
-    ADD_TABLE      — net_new (unless target_table matches a known dataset
-                     — checked by catalog).
-    DROP_TABLE     — needs_change (table existence is a catalog concern,
-                     not an ontology one).
+Line-level rules (no columns):
+  ADD_TABLE / DROP_TABLE — table-level actions; net_new / needs_change
+  BACKFILL / DATA_CORRECTION / DELETE_HISTORICAL — needs_change, requires
+    `rationale`; if `target_columns` is given, every column must exist.
+  ETL_LOGIC actions — require `transformation_logic`; if columns are
+    listed, every listed column must exist (modifying a column we don't
+    know about is invalid).
 
-  DML
-    BACKFILL / DATA_CORRECTION / DELETE_HISTORICAL — needs_change.
-    Operate on existing tables; if the target_attribute is set and not
-    found, classify invalid so users notice typos.
-
-  ETL_LOGIC
-    NEW_MAPPING                 — net_new.
-    MODIFY_MAPPING              — needs_change if target attribute
-                                  exists; invalid otherwise.
-    MODIFY_TRANSFORMATION /
-      MODIFY_FILTER /
-      MODIFY_AGGREGATION /
-      MODIFY_JOIN               — needs_change; transformation_logic
-                                  required.
+Column-level rules (DDL ADD/DROP/MODIFY_COLUMN, NEW_MAPPING,
+MODIFY_MAPPING):
+  ADD_COLUMN / NEW_MAPPING — column exists in ontology → exists; else
+    net_new. data_type required for ADD_COLUMN.
+  DROP_COLUMN / MODIFY_COLUMN / MODIFY_MAPPING — column must exist
+    (needs_change). Missing → invalid.
 """
 from __future__ import annotations
 
@@ -45,13 +33,29 @@ from app.domain.requests import (
     ChangeCategory,
     ChangeLine,
     ChangeLineInput,
+    ClassifiedColumn,
     Classification,
+    TargetColumnSpec,
 )
 from app.graph.driver import get_driver
 from app.graph.queries import get_query
 from app.services.catalog_client import CatalogClient, get_catalog_client
 
 logger = structlog.get_logger(__name__)
+
+
+_RANK = {
+    Classification.INVALID: 3,
+    Classification.NEEDS_CHANGE: 2,
+    Classification.NET_NEW: 1,
+    Classification.EXISTS: 0,
+}
+
+
+def _worst(classifications: list[Classification]) -> Classification:
+    if not classifications:
+        return Classification.NET_NEW
+    return max(classifications, key=lambda c: _RANK[c])
 
 
 class ValidationService:
@@ -66,8 +70,16 @@ class ValidationService:
     async def _classify_one(
         self, request_id: str, item: ChangeLineInput
     ) -> ChangeLine:
-        classification, reason = await self._classify(item)
-        existing_sources = await self._lookup_sources(item)
+        if not _action_matches_category(item.category, item.action):
+            return self._invalid_line(
+                request_id,
+                item,
+                f"action '{item.action.value}' is not valid under category '{item.category.value}'",
+            )
+
+        column_results = await self._classify_columns(item)
+        line_classification, line_reason = await self._classify_line(item, column_results)
+
         catalog_verified = await self._verify_catalog(item)
 
         return ChangeLine(
@@ -77,78 +89,122 @@ class ValidationService:
             action=item.action,
             pipeline_layer=item.pipeline_layer,
             entity=item.entity,
-            target_attribute=item.target_attribute,
+            target_columns=column_results,
             target_dataset=item.target_dataset,
             target_table=item.target_table,
-            target_column=item.target_column,
-            target_data_type=item.target_data_type,
-            target_nullable=item.target_nullable,
             source_system=item.source_system,
             source_dataset=item.source_dataset,
             source_table=item.source_table,
             source_column=item.source_column,
             transformation_logic=item.transformation_logic,
-            business_definition=item.business_definition,
             rationale=item.rationale,
             impact_notes=item.impact_notes,
-            classification=classification,
-            classification_reason=reason,
+            classification=line_classification,
+            classification_reason=line_reason,
             catalog_verified=catalog_verified,
-            existing_sources=existing_sources,
         )
 
-    async def _classify(
+    async def _classify_columns(
         self, item: ChangeLineInput
-    ) -> tuple[Classification, str]:
-        # First: refuse action/category mismatches.
-        if not _action_matches_category(item.category, item.action):
-            return (
-                Classification.INVALID,
-                f"action '{item.action.value}' is not valid under category '{item.category.value}'",
+    ) -> list[ClassifiedColumn]:
+        results: list[ClassifiedColumn] = []
+        for spec in item.target_columns:
+            classification, reason = await self._classify_column(item, spec)
+            sources = (
+                await self._lookup_sources(item.entity, spec.attribute)
+                if spec.attribute
+                else []
             )
+            results.append(
+                ClassifiedColumn(
+                    id=uuid4(),
+                    attribute=spec.attribute,
+                    data_type=spec.data_type,
+                    nullable=spec.nullable,
+                    business_definition=spec.business_definition,
+                    classification=classification,
+                    classification_reason=reason,
+                    existing_sources=sources,
+                )
+            )
+        return results
 
-        # DDL
-        if item.action == ChangeAction.ADD_COLUMN:
-            if not item.target_attribute:
-                return Classification.INVALID, "add_column requires target_attribute"
-            if not item.target_data_type:
-                return Classification.INVALID, "add_column requires target_data_type"
-            if await self._attribute_exists(item.entity, item.target_attribute):
+    async def _classify_column(
+        self, item: ChangeLineInput, spec: TargetColumnSpec
+    ) -> tuple[Classification, str]:
+        if not spec.attribute:
+            return Classification.INVALID, "Column requires an attribute name"
+
+        action = item.action
+        exists = await self._attribute_exists(item.entity, spec.attribute)
+
+        if action in (ChangeAction.ADD_COLUMN, ChangeAction.NEW_MAPPING):
+            if action == ChangeAction.ADD_COLUMN and not spec.data_type:
+                return (
+                    Classification.INVALID,
+                    f"{spec.attribute}: add_column requires a data_type",
+                )
+            if exists:
                 return (
                     Classification.EXISTS,
-                    f"{item.entity}.{item.target_attribute} already exists in the ontology — link instead of adding",
+                    f"{item.entity}.{spec.attribute} already exists in the ontology — link instead of adding",
                 )
             return (
                 Classification.NET_NEW,
-                f"{item.entity}.{item.target_attribute} is new — will be added on approval",
+                f"{item.entity}.{spec.attribute} is new — will be added on approval",
             )
 
-        if item.action == ChangeAction.MODIFY_COLUMN:
-            if not item.target_attribute:
-                return Classification.INVALID, "modify_column requires target_attribute"
-            if not await self._attribute_exists(item.entity, item.target_attribute):
+        if action in (
+            ChangeAction.DROP_COLUMN,
+            ChangeAction.MODIFY_COLUMN,
+            ChangeAction.MODIFY_MAPPING,
+        ):
+            if not exists:
                 return (
                     Classification.INVALID,
-                    f"Cannot modify {item.entity}.{item.target_attribute} — attribute does not exist",
+                    f"{item.entity}.{spec.attribute} does not exist in the ontology",
                 )
             return (
                 Classification.NEEDS_CHANGE,
-                f"Column modification proposed for {item.entity}.{item.target_attribute}",
+                f"{item.entity}.{spec.attribute} will be modified",
             )
 
-        if item.action == ChangeAction.DROP_COLUMN:
-            if not item.target_attribute:
-                return Classification.INVALID, "drop_column requires target_attribute"
-            if not await self._attribute_exists(item.entity, item.target_attribute):
-                return (
-                    Classification.INVALID,
-                    f"Cannot drop {item.entity}.{item.target_attribute} — attribute does not exist",
-                )
+        # DML / table-level / non-column-attribute ETL actions can still list
+        # affected columns. Each must exist (else flag invalid) but the line-
+        # level rule decides whether it's needs_change or net_new.
+        if not exists:
             return (
-                Classification.NEEDS_CHANGE,
-                f"Column drop proposed for {item.entity}.{item.target_attribute}",
+                Classification.INVALID,
+                f"{item.entity}.{spec.attribute} does not exist in the ontology",
             )
+        return (
+            Classification.NEEDS_CHANGE,
+            f"{item.entity}.{spec.attribute} affected by this change",
+        )
 
+    async def _classify_line(
+        self,
+        item: ChangeLineInput,
+        column_results: list[ClassifiedColumn],
+    ) -> tuple[Classification, str]:
+        # 1. Column-level actions: at least one column required, then roll up.
+        column_required = item.action in (
+            ChangeAction.ADD_COLUMN,
+            ChangeAction.DROP_COLUMN,
+            ChangeAction.MODIFY_COLUMN,
+            ChangeAction.NEW_MAPPING,
+            ChangeAction.MODIFY_MAPPING,
+        )
+        if column_required and not column_results:
+            return (
+                Classification.INVALID,
+                f"{item.action.value} requires at least one target column",
+            )
+        if column_required:
+            rolled = _worst([c.classification for c in column_results])
+            return rolled, _summary_reason(item, rolled, column_results)
+
+        # 2. Table-level DDL.
         if item.action == ChangeAction.ADD_TABLE:
             if not item.target_table:
                 return Classification.INVALID, "add_table requires target_table"
@@ -156,7 +212,6 @@ class ValidationService:
                 Classification.NET_NEW,
                 f"New table '{item.target_table}' will be added on approval",
             )
-
         if item.action == ChangeAction.DROP_TABLE:
             if not item.target_table:
                 return Classification.INVALID, "drop_table requires target_table"
@@ -165,52 +220,31 @@ class ValidationService:
                 f"Table '{item.target_table}' will be dropped on approval",
             )
 
-        # DML
+        # 3. DML.
         if item.action in (
             ChangeAction.BACKFILL,
             ChangeAction.DATA_CORRECTION,
             ChangeAction.DELETE_HISTORICAL,
         ):
-            if (
-                item.target_attribute
-                and not await self._attribute_exists(item.entity, item.target_attribute)
-            ):
-                return (
-                    Classification.INVALID,
-                    f"DML target {item.entity}.{item.target_attribute} does not exist",
-                )
             if not item.rationale:
                 return (
                     Classification.INVALID,
                     f"{item.action.value} requires a rationale",
                 )
+            if column_results:
+                rolled = _worst([c.classification for c in column_results])
+                # Even with all columns valid, DML is never net_new — coerce
+                # to needs_change.
+                if rolled in (Classification.NET_NEW, Classification.EXISTS):
+                    rolled = Classification.NEEDS_CHANGE
+                return rolled, _summary_reason(item, rolled, column_results)
             return (
                 Classification.NEEDS_CHANGE,
                 f"{item.action.value.replace('_', ' ').title()} on existing data",
             )
 
-        # ETL Logic
-        if item.action == ChangeAction.NEW_MAPPING:
-            if not item.target_attribute:
-                return Classification.INVALID, "new_mapping requires target_attribute"
-            return (
-                Classification.NET_NEW,
-                f"New mapping for {item.entity}.{item.target_attribute}",
-            )
-
-        if item.action == ChangeAction.MODIFY_MAPPING:
-            if not item.target_attribute:
-                return Classification.INVALID, "modify_mapping requires target_attribute"
-            if not await self._attribute_exists(item.entity, item.target_attribute):
-                return (
-                    Classification.INVALID,
-                    f"Cannot modify mapping — {item.entity}.{item.target_attribute} does not exist",
-                )
-            return (
-                Classification.NEEDS_CHANGE,
-                f"Mapping update for {item.entity}.{item.target_attribute}",
-            )
-
+        # 4. Other ETL-Logic actions (modify_transformation / filter /
+        #    aggregation / join). transformation_logic required.
         if item.action in (
             ChangeAction.MODIFY_TRANSFORMATION,
             ChangeAction.MODIFY_FILTER,
@@ -222,22 +256,41 @@ class ValidationService:
                     Classification.INVALID,
                     f"{item.action.value} requires transformation_logic",
                 )
-            if (
-                item.target_attribute
-                and not await self._attribute_exists(item.entity, item.target_attribute)
-            ):
-                return (
-                    Classification.INVALID,
-                    f"Target {item.entity}.{item.target_attribute} does not exist",
-                )
-            label = item.action.value.replace("_", " ").title()
+            if column_results:
+                rolled = _worst([c.classification for c in column_results])
+                return rolled, _summary_reason(item, rolled, column_results)
             return (
                 Classification.NEEDS_CHANGE,
-                f"{label} for {item.entity}"
-                + (f".{item.target_attribute}" if item.target_attribute else ""),
+                f"{item.action.value.replace('_', ' ').title()} for {item.entity}",
             )
 
         return Classification.INVALID, f"Unhandled action: {item.action.value}"
+
+    @staticmethod
+    def _invalid_line(
+        request_id: str, item: ChangeLineInput, reason: str
+    ) -> ChangeLine:
+        return ChangeLine(
+            id=uuid4(),
+            request_id=request_id,
+            category=item.category,
+            action=item.action,
+            pipeline_layer=item.pipeline_layer,
+            entity=item.entity,
+            target_columns=[],
+            target_dataset=item.target_dataset,
+            target_table=item.target_table,
+            source_system=item.source_system,
+            source_dataset=item.source_dataset,
+            source_table=item.source_table,
+            source_column=item.source_column,
+            transformation_logic=item.transformation_logic,
+            rationale=item.rationale,
+            impact_notes=item.impact_notes,
+            classification=Classification.INVALID,
+            classification_reason=reason,
+            catalog_verified=None,
+        )
 
     async def _attribute_exists(self, entity: str, attribute: str) -> bool:
         driver = get_driver()
@@ -250,15 +303,13 @@ class ValidationService:
             record = await result.single()
         return record is not None
 
-    async def _lookup_sources(self, item: ChangeLineInput) -> list[str]:
-        if not item.target_attribute:
-            return []
+    async def _lookup_sources(self, entity: str, attribute: str) -> list[str]:
         driver = get_driver()
         async with driver.session(database=get_settings().neo4j_database) as session:
             result = await session.run(
                 get_query("get_attribute_sources"),
-                entity=item.entity,
-                attribute=item.target_attribute,
+                entity=entity,
+                attribute=attribute,
             )
             return [record["column_id"] async for record in result]
 
@@ -272,6 +323,31 @@ class ValidationService:
             column=item.source_column,
         )
         return v.found
+
+
+def _summary_reason(
+    item: ChangeLineInput,
+    rolled: Classification,
+    columns: list[ClassifiedColumn],
+) -> str:
+    counts: dict[str, int] = {}
+    for c in columns:
+        counts[c.classification.value] = counts.get(c.classification.value, 0) + 1
+    if rolled == Classification.INVALID:
+        return f"{counts.get('invalid', 0)} of {len(columns)} column(s) invalid"
+    if len(counts) == 1:
+        only = next(iter(counts))
+        if only == "exists":
+            return f"All {len(columns)} column(s) already exist in the ontology"
+        if only == "net_new":
+            return f"All {len(columns)} column(s) are net new"
+        if only == "needs_change":
+            return f"All {len(columns)} column(s) need changes"
+    parts = []
+    for k in ("exists", "net_new", "needs_change", "invalid"):
+        if counts.get(k):
+            parts.append(f"{counts[k]} {k.replace('_', ' ')}")
+    return ", ".join(parts) if parts else f"{item.action.value} on {item.entity}"
 
 
 # ---------------------------------------------------------------

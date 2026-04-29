@@ -64,6 +64,7 @@ const EMPTY_LINE: ChangeLineDraft = {
   action: "add_column",
   pipeline_layer: "transformation",
   entity: "",
+  target_columns: [{ attribute: "" }],
 };
 
 export function IntakePage() {
@@ -271,14 +272,6 @@ export function IntakePage() {
                       {item.classification_reason}
                     </span>
                   )}
-                  {item.existing_sources && item.existing_sources.length > 0 && (
-                    <span className="text-gray-500">
-                      Sources:{" "}
-                      <span className="font-mono">
-                        {item.existing_sources.join(", ")}
-                      </span>
-                    </span>
-                  )}
                 </div>
               )}
             </div>
@@ -324,18 +317,19 @@ function stripClassification(it: ChangeLineClassified): ChangeLineDraft {
     action: it.action,
     pipeline_layer: it.pipeline_layer,
     entity: it.entity,
-    target_attribute: it.target_attribute ?? null,
+    target_columns: it.target_columns.map((c) => ({
+      attribute: c.attribute,
+      data_type: c.data_type ?? null,
+      nullable: c.nullable ?? null,
+      business_definition: c.business_definition ?? null,
+    })),
     target_dataset: it.target_dataset ?? null,
     target_table: it.target_table ?? null,
-    target_column: it.target_column ?? null,
-    target_data_type: it.target_data_type ?? null,
-    target_nullable: it.target_nullable ?? null,
     source_system: it.source_system ?? null,
     source_dataset: it.source_dataset ?? null,
     source_table: it.source_table ?? null,
     source_column: it.source_column ?? null,
     transformation_logic: it.transformation_logic ?? null,
-    business_definition: it.business_definition ?? null,
     rationale: it.rationale ?? null,
     impact_notes: it.impact_notes ?? null,
   };
